@@ -14,9 +14,7 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
             return DestinationCapabilities(supportsAccessibilityInsertion: false,
                                            allowsSyntheticPaste: true, isSecureInput: false)
         }
-        let role = AX.string(focused, kAXRoleAttribute)
-        let subrole = AX.string(focused, kAXSubroleAttribute)
-        let isSecure = (subrole == (kAXSecureTextFieldSubrole as String)) || (role == "AXSecureTextField")
+        let isSecure = Self.isSecure(focused)
         let settable = AX.isSettable(focused, kAXSelectedTextAttribute) || AX.isSettable(focused, kAXValueAttribute)
         return DestinationCapabilities(
             supportsAccessibilityInsertion: settable && !isSecure,
@@ -26,6 +24,16 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
     }
 
     func insert(_ text: String, using strategy: InsertionStrategy) throws -> InsertionOutcome {
+        // Last-moment secure-field guard (closes the TOCTOU between planning and
+        // insertion): if the focused field is secure *now* — e.g. focus moved to a
+        // password field within the same app after the plan was made — never AX-set
+        // or synthesize a paste. Copy to the clipboard instead.
+        if strategy != .copyOnly, focusedFieldIsSecure() {
+            copyToClipboard(text)
+            return InsertionOutcome(strategy: .copyOnly, didInsert: false,
+                note: "Focused field is secure; copied to clipboard instead of inserting.")
+        }
+
         switch strategy {
         case .accessibility:
             if insertViaAccessibility(text) {
@@ -35,13 +43,32 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
             return try insert(text, using: .clipboardPaste)
 
         case .clipboardPaste:
-            try pasteWithRestore(text)
+            do {
+                try pasteWithRestore(text)
+            } catch VoiceFlowError.secureFieldBlocked {
+                // Field became secure between the guard above and the keystroke.
+                copyToClipboard(text)
+                return InsertionOutcome(strategy: .copyOnly, didInsert: false,
+                    note: "Focused field is secure; copied to clipboard instead of inserting.")
+            }
             return InsertionOutcome(strategy: .clipboardPaste, didInsert: true)
 
         case .copyOnly:
             copyToClipboard(text)
             return InsertionOutcome(strategy: .copyOnly, didInsert: false)
         }
+    }
+
+    /// Whether the *currently* focused element is a secure (password) field.
+    private func focusedFieldIsSecure() -> Bool {
+        guard let focused = AX.focusedElement() else { return false }
+        return Self.isSecure(focused)
+    }
+
+    private static func isSecure(_ element: AXUIElement) -> Bool {
+        let role = AX.string(element, kAXRoleAttribute)
+        let subrole = AX.string(element, kAXSubroleAttribute)
+        return (subrole == (kAXSecureTextFieldSubrole as String)) || (role == "AXSecureTextField")
     }
 
     func copyToClipboard(_ text: String) {
@@ -67,6 +94,9 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
     }
 
     private func pasteWithRestore(_ text: String) throws {
+        // Final secure-field re-check immediately before synthesizing the paste.
+        if focusedFieldIsSecure() { throw VoiceFlowError.secureFieldBlocked }
+
         let pb = NSPasteboard.general
         // Save the current clipboard string (best-effort).
         let previous = pb.string(forType: .string)

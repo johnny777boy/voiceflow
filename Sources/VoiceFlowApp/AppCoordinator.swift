@@ -22,6 +22,9 @@ final class AppCoordinator: ObservableObject {
     private let secureStore: SecureStoring
     private let overlay = OverlayController()
     private var didStart = false
+    /// Set synchronously before awaiting a recording transition, so rapid or
+    /// auto-repeating hotkey events can't interleave two begin/finish tasks.
+    private var busy = false
 
     init() {
         let settingsStore = SettingsStore()
@@ -97,7 +100,9 @@ final class AppCoordinator: ObservableObject {
     // MARK: - Recording
 
     func beginRecording() async {
-        guard !isRecording else { return }
+        guard !isRecording, !busy else { return }
+        busy = true
+        defer { busy = false }
         do {
             try await controller.beginRecording()
             isRecording = true
@@ -110,7 +115,9 @@ final class AppCoordinator: ObservableObject {
     }
 
     func finishRecording() async {
-        guard isRecording else { return }
+        guard isRecording, !busy else { return }
+        busy = true
+        defer { busy = false }
         isRecording = false
         statusText = "Transcribing…"
         overlay.show(state: .processing)

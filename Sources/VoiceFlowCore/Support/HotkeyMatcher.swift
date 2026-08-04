@@ -45,6 +45,14 @@ public enum HotkeyMatcher {
         present.isSuperset(of: required)
     }
 
+    /// For push-to-talk: whether a change (a modifier released, or the key going
+    /// up) should end the currently-held chord and emit `.released`. Extracted so
+    /// the "modifier released while the main key is still down" case — which the
+    /// live event tap must handle via `flagsChanged` — is unit-tested.
+    public static func shouldEndChord(isChordDown: Bool, isPushToTalk: Bool, modifiersStillMatch: Bool) -> Bool {
+        isChordDown && isPushToTalk && !modifiersStillMatch
+    }
+
     /// Whether a key event with `keyCode` and `present` modifiers triggers the
     /// configured hotkey. A `nil` configured keyCode matches any key (pure-modifier
     /// chord).

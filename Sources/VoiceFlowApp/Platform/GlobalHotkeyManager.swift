@@ -17,7 +17,11 @@ final class GlobalHotkeyManager: HotkeyManaging, @unchecked Sendable {
         self.configuration = configuration
         self.handler = handler
 
-        let mask: CGEventMask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue)
+        // Include flagsChanged so a modifier release (while the main key is still
+        // held) can end a push-to-talk chord.
+        let mask: CGEventMask = (1 << CGEventType.keyDown.rawValue)
+            | (1 << CGEventType.keyUp.rawValue)
+            | (1 << CGEventType.flagsChanged.rawValue)
         let refcon = Unmanaged.passUnretained(self).toOpaque()
 
         guard let tap = CGEvent.tapCreate(
@@ -64,14 +68,33 @@ final class GlobalHotkeyManager: HotkeyManaging, @unchecked Sendable {
 
     private func handle(type: CGEventType, event: CGEvent) {
         guard let config = configuration, let handler else { return }
+
+        let present = Self.modifierSet(from: event.flags)
+        let modsOK = HotkeyMatcher.matches(
+            required: HotkeyMatcher.decode(carbonMask: config.modifierFlags), present: present)
+
+        // A modifier changed (no key up/down). Only relevant to END a held
+        // push-to-talk chord when the required modifiers are no longer down.
+        if type == .flagsChanged {
+            if HotkeyMatcher.shouldEndChord(isChordDown: isChordDown,
+                                            isPushToTalk: config.isPushToTalk,
+                                            modifiersStillMatch: modsOK) {
+                isChordDown = false
+                handler(.released)
+            }
+            return
+        }
+
+        // keyDown / keyUp: gate on the configured key code.
         let keyCode = UInt32(event.getIntegerValueField(.keyboardEventKeycode))
         guard config.keyCode == nil || config.keyCode == keyCode else { return }
 
-        let present = Self.modifierSet(from: event.flags)
-        let required = HotkeyMatcher.decode(carbonMask: config.modifierFlags)
-        guard HotkeyMatcher.matches(required: required, present: present) else {
-            // Chord broken (modifier released): treat as release for push-to-talk.
-            if type == .keyUp && isChordDown && config.isPushToTalk {
+        guard modsOK else {
+            // Chord broken (modifier released together with a key event).
+            if type == .keyUp,
+               HotkeyMatcher.shouldEndChord(isChordDown: isChordDown,
+                                            isPushToTalk: config.isPushToTalk,
+                                            modifiersStillMatch: false) {
                 isChordDown = false
                 handler(.released)
             }
@@ -80,10 +103,11 @@ final class GlobalHotkeyManager: HotkeyManaging, @unchecked Sendable {
 
         switch type {
         case .keyDown:
+            let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
             if config.isPushToTalk {
-                if !isChordDown { isChordDown = true; handler(.pressed) }
-            } else {
-                handler(.toggled)
+                if !isChordDown { isChordDown = true; handler(.pressed) }   // ignores auto-repeat via isChordDown
+            } else if !isRepeat {
+                handler(.toggled)   // one toggle per physical press, not per auto-repeat
             }
         case .keyUp:
             if config.isPushToTalk && isChordDown {

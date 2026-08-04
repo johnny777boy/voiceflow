@@ -7,6 +7,30 @@ import VoiceFlowCore
 /// buffer from the captured samples and runs a buffer-based recognition request,
 /// preferring on-device recognition for privacy.
 final class SpeechTranscriber: Transcribing, @unchecked Sendable {
+    /// Max time to wait for a final result after `endAudio()` before giving up.
+    private let timeout: TimeInterval
+
+    init(timeout: TimeInterval = 20) { self.timeout = timeout }
+
+    /// Ensures a continuation is resumed exactly once, even though the recognizer
+    /// callback and the timeout fire on different queues.
+    private final class ResumeOnce: @unchecked Sendable {
+        private let lock = NSLock()
+        private var done = false
+        func fire(_ body: () -> Void) {
+            lock.lock(); let first = !done; done = true; lock.unlock()
+            if first { body() }
+        }
+    }
+
+    /// Sendable holder so the timeout closure can cancel the (non-Sendable)
+    /// recognition task without capturing it directly.
+    private final class TaskHolder: @unchecked Sendable {
+        private let lock = NSLock()
+        private var task: SFSpeechRecognitionTask?
+        func set(_ t: SFSpeechRecognitionTask) { lock.lock(); task = t; lock.unlock() }
+        func cancel() { lock.lock(); let t = task; lock.unlock(); t?.cancel() }
+    }
 
     func requestPermission() async -> Bool {
         await withCheckedContinuation { continuation in
@@ -37,22 +61,28 @@ final class SpeechTranscriber: Transcribing, @unchecked Sendable {
         request.append(buffer)
         request.endAudio()
 
-        return try await withCheckedThrowingContinuation { continuation in
-            var finished = false
-            recognizer.recognitionTask(with: request) { result, error in
-                if finished { return }
+        let once = ResumeOnce()
+        let holder = TaskHolder()
+        let timeout = self.timeout
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<TranscriptionResult, Error>) in
+            let task = recognizer.recognitionTask(with: request) { result, error in
                 if let error {
-                    finished = true
-                    continuation.resume(throwing: VoiceFlowError.transcriptionFailed(error.localizedDescription))
+                    once.fire { continuation.resume(throwing: VoiceFlowError.transcriptionFailed(error.localizedDescription)) }
                     return
                 }
-                guard let result else { return }
-                if result.isFinal {
-                    finished = true
-                    let best = result.bestTranscription
-                    let confidence = best.segments.map { $0.confidence }.reduce(0, +)
-                        / Float(max(1, best.segments.count))
-                    continuation.resume(returning: TranscriptionResult(text: best.formattedString, confidence: confidence))
+                guard let result, result.isFinal else { return }
+                let best = result.bestTranscription
+                let confidence = best.segments.map { $0.confidence }.reduce(0, +)
+                    / Float(max(1, best.segments.count))
+                once.fire { continuation.resume(returning: TranscriptionResult(text: best.formattedString, confidence: confidence)) }
+            }
+            holder.set(task)
+            // Watchdog: if the recognizer stalls after endAudio() and never
+            // delivers a final result or an error, cancel it and fail cleanly.
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+                once.fire {
+                    holder.cancel()
+                    continuation.resume(throwing: VoiceFlowError.transcriptionFailed("recognition timed out after \(Int(timeout))s"))
                 }
             }
         }

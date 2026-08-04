@@ -14,7 +14,7 @@ How to reproduce locally:
 ```bash
 git checkout feature/system-dictation-daily-use
 swift build            # expect: Build complete, 0 warnings
-swift run VoiceFlowTests   # expect: "All 78 tests passed", exit 0
+swift run VoiceFlowTests   # expect: "All 79 tests passed", exit 0
 ./Scripts/build_app.sh release   # expect: dist/VoiceFlow.app, ad-hoc signed
 ```
 
@@ -83,7 +83,7 @@ Commits (logical milestones):
 
 ## 3. Test results
 
-`swift run VoiceFlowTests` → **78/78 passed**, exit 0. `swift build` → **0 warnings**
+`swift run VoiceFlowTests` → **79/79 passed**, exit 0. `swift build` → **0 warnings**
 under Swift 6 strict concurrency. Release `.app` builds and ad-hoc codesigns
 (hardened runtime, valid on disk). Full breakdown in `docs/VERIFICATION.md`.
 
@@ -132,7 +132,7 @@ under Swift 6 strict concurrency. Release `.app` builds and ad-hoc codesigns
 
 ## 6. Suggested review checklist for Codex
 
-- [ ] Reproduce: `swift build` (0 warnings) and `swift run VoiceFlowTests` (78 pass).
+- [ ] Reproduce: `swift build` (0 warnings) and `swift run VoiceFlowTests` (79 pass).
 - [ ] Read `DictationController.finishRecording` — confirm destination is
       re-verified *after* transcription/cleanup and *before* insertion, and that
       every failure path degrades to copy-only (never a wrong-app write).
@@ -152,3 +152,49 @@ under Swift 6 strict concurrency. Release `.app` builds and ad-hoc codesigns
 
 Report findings as a list; fixes will be applied in the worktree and verification
 re-run until clean.
+
+---
+
+## 7. Round 2 — fixes applied in response to review
+
+Codex's first pass (78 tests) confirmed the safety invariant, SQLite hygiene, and
+transport shape, and raised **four** defects. All four are now fixed on the branch
+(commit follows this doc). Please re-verify:
+
+1. **Secure-field TOCTOU in the AX/paste fallback** — *fixed.*
+   `AccessibilityTextInserter.insert` now performs a **last-moment secure-field
+   check** (`focusedFieldIsSecure()`) before any AX set or synthetic paste, for
+   every non-copy strategy, and `pasteWithRestore` re-checks once more immediately
+   before synthesizing Cmd-V (throwing `secureFieldBlocked`, which `insert`
+   converts to a copy-only outcome). The AX-fail → paste fallthrough can no longer
+   paste into a field that became secure after planning.
+   *Verify:* `Sources/VoiceFlowApp/Platform/AccessibilityTextInserter.swift`
+   (`insert`, `pasteWithRestore`, `focusedFieldIsSecure`).
+
+2. **Modifier-release while the main key is held** — *fixed.*
+   `GlobalHotkeyManager` now also subscribes to `.flagsChanged`, and `handle`
+   processes flag changes **before** the key-code guard. On a push-to-talk chord,
+   releasing a modifier while the key is still down now emits `.released` via the
+   new pure, unit-tested `HotkeyMatcher.shouldEndChord(...)`.
+   *Verify:* `GlobalHotkeyManager.handle` + `HotkeyMatcher.shouldEndChord` (test:
+   "shouldEndChord: push-to-talk ends when modifiers drop while held").
+
+3. **Toggle autorepeat + begin/finish interleave** — *fixed.*
+   Toggle-mode `keyDown` now ignores OS auto-repeat (`keyboardEventAutorepeat`),
+   so one physical press = one `.toggled`. `AppCoordinator.beginRecording` /
+   `finishRecording` set a synchronous `busy` latch **before** the `await`, so two
+   queued toggle tasks can no longer both pass the `isRecording` guard and
+   double-enter a transition.
+   *Verify:* `GlobalHotkeyManager.handle` (`isRepeat`) + `AppCoordinator` (`busy`).
+
+4. **Speech recognition can hang with no timeout** — *fixed.*
+   `SpeechTranscriber.transcribe` now arms a **watchdog** (default 20 s) that
+   cancels the recognition task and fails cleanly if no final result/error arrives
+   after `endAudio()`. Continuation resumption is guarded by a lock-based
+   `ResumeOnce` (the old `finished` flag was mutated from the recognizer's callback
+   queue without synchronization); the task is cancelled through a Sendable holder.
+   *Verify:* `Sources/VoiceFlowApp/Platform/SpeechTranscriber.swift`.
+
+Post-fix status: `swift build` → **0 warnings**, `swift run VoiceFlowTests` →
+**79/79 passed** (added `shouldEndChord` coverage). Release `.app` rebuilds and
+signs.

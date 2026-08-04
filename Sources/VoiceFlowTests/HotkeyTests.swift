@@ -41,6 +41,18 @@ func runHotkeyTests(_ s: TestSuite) {
                                              eventKeyCode: 0x2A, present: [.command]))
     }
 
+    s.test("shouldEndChord: push-to-talk ends when modifiers drop while held") { s in
+        // Chord held, modifiers no longer match ⇒ release (the modifier-release-
+        // while-key-held case the live tap handles via flagsChanged).
+        s.expect(HotkeyMatcher.shouldEndChord(isChordDown: true, isPushToTalk: true, modifiersStillMatch: false))
+        // Still matching ⇒ keep holding.
+        s.expectFalse(HotkeyMatcher.shouldEndChord(isChordDown: true, isPushToTalk: true, modifiersStillMatch: true))
+        // Not currently held ⇒ nothing to end.
+        s.expectFalse(HotkeyMatcher.shouldEndChord(isChordDown: false, isPushToTalk: true, modifiersStillMatch: false))
+        // Toggle mode never uses chord-end.
+        s.expectFalse(HotkeyMatcher.shouldEndChord(isChordDown: true, isPushToTalk: false, modifiersStillMatch: false))
+    }
+
     s.test("default hotkey configuration decodes to Option") { s in
         let config = HotkeyConfiguration.defaultPushToTalk
         s.expectEqual(HotkeyMatcher.decode(carbonMask: config.modifierFlags), [.option])
