@@ -15,7 +15,7 @@ runCleanupTests(suite)
 runInsertionPlannerTests(suite)
 runDestinationGuardTests(suite)
 runHistoryStoreTests(suite)
-// Subsystem runners are appended here as each area lands:
-// runSecurityTests, runControllerTests
+runSecurityTests(suite)
+runControllerTests(suite)
 
 suite.finish()
