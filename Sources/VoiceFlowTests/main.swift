@@ -12,8 +12,10 @@ print("Running VoiceFlow test suite…\n")
 runModelTests(suite)
 runVocabularyTests(suite)
 runCleanupTests(suite)
+runInsertionPlannerTests(suite)
+runDestinationGuardTests(suite)
+runHistoryStoreTests(suite)
 // Subsystem runners are appended here as each area lands:
-// runDestinationGuardTests, runInsertionPlannerTests, runHistoryStoreTests,
 // runSecurityTests, runControllerTests
 
 suite.finish()
