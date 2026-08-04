@@ -18,9 +18,14 @@
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
-    <!-- Menu-bar-only app: no Dock icon, no main window. -->
+    <!-- App icon (AppIcon.icns lives in Contents/Resources). -->
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
+    <!-- Regular app: Dock icon + main window, and still a menu-bar extra. -->
     <key>LSUIElement</key>
-    <true/>
+    <false/>
     <!-- TCC usage descriptions (required before the OS will prompt). -->
     <key>NSMicrophoneUsageDescription</key>
     <string>VoiceFlow records audio while you hold the dictation hotkey so it can transcribe your speech.</string>
