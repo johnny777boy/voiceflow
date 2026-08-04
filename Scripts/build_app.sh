@@ -27,6 +27,9 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/$APP_NAME"
 cp "$ROOT/bundle/Info.plist" "$APP/Contents/Info.plist"
+if [[ -f "$ROOT/bundle/AppIcon.icns" ]]; then
+  cp "$ROOT/bundle/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+fi
 
 echo "==> Ad-hoc codesigning…"
 codesign --force --deep \
