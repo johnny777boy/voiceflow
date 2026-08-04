@@ -245,3 +245,31 @@ and auto-repeat).
 3. Confirm `swift build` (0 warnings) and `swift run VoiceFlowTests` (79 pass) still hold.
 
 All code is on the branch and on GitHub. Thanks.
+
+---
+
+## 9. Resolution — Codex round-2 review applied
+
+> Note: Codex's round-2 pass reviewed a stale checkout (it flagged the two compile
+> errors at `LiveSpeechDictation.swift:91/116` that were already fixed + pushed on
+> `d1b1d51`). Its substantive recommendations were applied:
+
+- **Capture bug is resolved** in practice — the app now transcribes real speech. Root
+  fixes: fresh `AVAudioEngine` per recording, and (this round) **AVAudioEngine lifecycle
+  runs on the main thread** via an `onMain` marshal in `LiveSpeechDictation`
+  (`start/stopRecording` are invoked from the `DictationController` actor, off-main).
+- **Format handling** per Codex: guard on `input.inputFormat(forBus:0)` (hardware
+  availability), tap with `input.outputFormat(forBus:0)`.
+- **Long dictation**: switched to live streaming (`LiveSpeechDictation` feeds
+  `SFSpeechAudioBufferRecognitionRequest` continuously with partial results) so
+  paragraphs aren't truncated. (On-device recognition still has a ~1-min practical
+  ceiling; multi-minute needs segmentation — noted as follow-up.)
+- **Global hotkey now consumes the key** per Codex: `CGEvent.tapCreate` switched from
+  `.listenOnly` to `.defaultTap`; `handle(...)` returns whether to consume, and the
+  callback returns `nil` for matched key-down / auto-repeat / key-up so the push-to-talk
+  key does **not** type a character. `flagsChanged` is never consumed. Added
+  `tapDisabledByTimeout/UserInput` re-enable. Auto-repeat filtered for toggle mode.
+- **In-app button** is tap-to-toggle; **hotkey** is hold-to-talk.
+
+Pure-modifier / fn triggers were intentionally NOT added (Codex advised against bolting
+them onto the keyDown recorder); the recorder captures modifiers + one non-modifier key.

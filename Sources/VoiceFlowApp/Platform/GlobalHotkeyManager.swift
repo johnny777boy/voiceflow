@@ -27,14 +27,17 @@ final class GlobalHotkeyManager: HotkeyManaging, @unchecked Sendable {
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
-            options: .listenOnly,
+            options: .defaultTap,   // active tap so we can CONSUME the hotkey key
             eventsOfInterest: mask,
             callback: { _, type, event, refcon in
+                var consume = false
                 if let refcon {
                     let manager = Unmanaged<GlobalHotkeyManager>.fromOpaque(refcon).takeUnretainedValue()
-                    manager.handle(type: type, event: event)
+                    consume = manager.handle(type: type, event: event)
                 }
-                return Unmanaged.passUnretained(event)
+                // Returning nil discards the event (so the push-to-talk key does
+                // not type a character); otherwise pass it through unchanged.
+                return consume ? nil : Unmanaged.passUnretained(event)
             },
             userInfo: refcon
         ) else {
@@ -66,15 +69,23 @@ final class GlobalHotkeyManager: HotkeyManaging, @unchecked Sendable {
 
     // MARK: - Event handling
 
-    private func handle(type: CGEventType, event: CGEvent) {
-        guard let config = configuration, let handler else { return }
+    /// Handle a tapped event. Returns `true` if the event should be **consumed**
+    /// (swallowed) so the hotkey key doesn't type a character.
+    private func handle(type: CGEventType, event: CGEvent) -> Bool {
+        // The system disables an active tap if the callback is ever too slow;
+        // re-enable it so the hotkey keeps working.
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            if let eventTap { CGEvent.tapEnable(tap: eventTap, enable: true) }
+            return false
+        }
+        guard let config = configuration, let handler else { return false }
 
         let present = Self.modifierSet(from: event.flags)
         let modsOK = HotkeyMatcher.matches(
             required: HotkeyMatcher.decode(carbonMask: config.modifierFlags), present: present)
 
-        // A modifier changed (no key up/down). Only relevant to END a held
-        // push-to-talk chord when the required modifiers are no longer down.
+        // A modifier changed (no key up/down). Only used to END a held
+        // push-to-talk chord. Never consumed — modifier keys must keep working.
         if type == .flagsChanged {
             if HotkeyMatcher.shouldEndChord(isChordDown: isChordDown,
                                             isPushToTalk: config.isPushToTalk,
@@ -82,12 +93,12 @@ final class GlobalHotkeyManager: HotkeyManaging, @unchecked Sendable {
                 isChordDown = false
                 handler(.released)
             }
-            return
+            return false
         }
 
         // keyDown / keyUp: gate on the configured key code.
         let keyCode = UInt32(event.getIntegerValueField(.keyboardEventKeycode))
-        guard config.keyCode == nil || config.keyCode == keyCode else { return }
+        guard config.keyCode == nil || config.keyCode == keyCode else { return false }
 
         guard modsOK else {
             // Chord broken (modifier released together with a key event).
@@ -97,8 +108,9 @@ final class GlobalHotkeyManager: HotkeyManaging, @unchecked Sendable {
                                             modifiersStillMatch: false) {
                 isChordDown = false
                 handler(.released)
+                return true   // consume the matching key-up that ended the chord
             }
-            return
+            return false
         }
 
         switch type {
@@ -109,13 +121,15 @@ final class GlobalHotkeyManager: HotkeyManaging, @unchecked Sendable {
             } else if !isRepeat {
                 handler(.toggled)   // one toggle per physical press, not per auto-repeat
             }
+            return true   // consume the hotkey key-down (and its auto-repeats)
         case .keyUp:
             if config.isPushToTalk && isChordDown {
                 isChordDown = false
                 handler(.released)
             }
+            return true   // consume the matching key-up
         default:
-            break
+            return false
         }
     }
 
