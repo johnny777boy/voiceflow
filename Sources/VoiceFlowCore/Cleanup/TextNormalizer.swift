@@ -5,9 +5,15 @@ import Foundation
 public enum TextNormalizer {
 
     /// Common spoken filler words removed during standard/aggressive cleanup.
+    ///
+    /// Deliberately limited to hesitation sounds and unambiguous multi-word
+    /// hedges. Words like "like", "actually", "literally", "basically",
+    /// "sort of", and "kind of" are intentionally NOT here — they are frequently
+    /// meaningful ("I like it", "kind of blue"), and removing them would silently
+    /// change the speaker's meaning.
     public static let fillerWords: Set<String> = [
-        "um", "uh", "uhh", "umm", "er", "err", "ah", "hmm", "mhm",
-        "like", "basically", "literally", "actually", "you know", "i mean", "sort of", "kind of"
+        "um", "uh", "uhh", "umm", "uhm", "er", "err", "erm", "ah", "hmm", "mhm",
+        "you know", "i mean"
     ]
 
     /// Collapse runs of whitespace to single spaces and trim ends. Newlines are

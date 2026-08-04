@@ -1,0 +1,152 @@
+# VoiceFlow — External Verification Package (for Codex)
+
+> **Role:** Codex acts as an **external reviewer**. Please independently verify
+> the work below. If you find problems, list them concretely (file:line where
+> possible) so they can be fixed inside the worktree; verification then repeats
+> until clean. Do not merge — the owner does that.
+
+**Branch under review:** `feature/system-dictation-daily-use`
+**Base:** `main`
+**Toolchain:** Swift 6.2.3 · macOS 26.5.1 · arm64 · Command Line Tools only (no full Xcode)
+
+How to reproduce locally:
+
+```bash
+git checkout feature/system-dictation-daily-use
+swift build            # expect: Build complete, 0 warnings
+swift run VoiceFlowTests   # expect: "All 72 tests passed", exit 0
+./Scripts/build_app.sh release   # expect: dist/VoiceFlow.app, ad-hoc signed
+```
+
+---
+
+## 1. Architecture summary
+
+A macOS menu-bar push-to-talk dictation app. The workflow is:
+
+```
+Hold hotkey → record → transcribe → clean → RE-VERIFY destination → insert/copy
+```
+
+Two Swift Package targets carry the design:
+
+- **`VoiceFlowCore`** — all decision logic behind protocols, no UI/AV/AX imports.
+  This is what the tests exercise.
+- **`VoiceFlowApp`** — the `@main` SwiftUI app: protocol implementations using
+  AVAudioEngine / SFSpeechRecognizer / CGEvent tap / Accessibility / NSWorkspace /
+  Keychain, plus the menu-bar UI, settings, and overlay.
+
+Testing uses a custom XCTest-free harness (`VoiceFlowTestKit`) run as an
+executable (`VoiceFlowTests`), because the CLT SDK ships neither XCTest nor
+swift-testing. `swift run VoiceFlowTests` exits non-zero on failure.
+
+The orchestrator is `DictationController` (an `actor`). It is the single place
+that sequences the pipeline and enforces the safety rules:
+
+- Captures the destination at record start; **re-captures and compares** before
+  insertion.
+- `DestinationGuard` forces **copy-only** if the app changed or the field is
+  secure (password). It never inserts into the wrong app or a secure field.
+- `InsertionPlanner` priority: Accessibility → clipboard-restore paste → copy-only.
+- **The app never synthesizes Return / never sends / never runs a command.**
+
+See `docs/ARCHITECTURE.md` for the full design.
+
+## 2. Files changed
+
+61 files added on the branch (0 deletions vs `main`). By area:
+
+| Area | Files | Key contents |
+|------|:----:|--------------|
+| `Sources/VoiceFlowCore/Models` | 8 | `DictationMode`, `DestinationSnapshot` (+`matches`), `InsertionStrategy`, `VocabularyEntry`, `TranscriptRecord`, `AppSettings`/`HotkeyConfiguration`, `PerAppBehavior`, `CleanupStrength` |
+| `Sources/VoiceFlowCore/Protocols` | 8 | The eight abstraction seams |
+| `Sources/VoiceFlowCore/Cleanup` | 6 | `VocabularyReplacer`, `TextNormalizer`, `RuleBasedCleanup`, `CleanupPipeline`, `LLMCleanupProvider`(+`AnthropicTransport`), `CleanupPromptBuilder` |
+| `Sources/VoiceFlowCore/Destination` | 1 | `DestinationGuard` |
+| `Sources/VoiceFlowCore/Insertion` | 1 | `InsertionPlanner` |
+| `Sources/VoiceFlowCore/History` | 3 | `SQLiteHistoryStore`, `InMemoryHistoryStore`, `SettingsStore` |
+| `Sources/VoiceFlowCore/Security` | 1 | `KeychainStore` |
+| `Sources/VoiceFlowCore/Support` | 5 | errors, logging, clock, app paths, info; `DictationController` at core root |
+| `Sources/VoiceFlowApp/Platform` | 6 | `AudioEngineRecorder`, `SpeechTranscriber`, `GlobalHotkeyManager`, `AccessibilityTextInserter`, `WorkspaceActiveAppProvider`, `AccessibilityBridge` |
+| `Sources/VoiceFlowApp/UI` + root | 6 | `AppMain`, `AppCoordinator`, `MenuContentView`, `SettingsView`, `OverlayController`, `OverlayView` |
+| `Sources/VoiceFlowTests` | 9 | Model, vocabulary, cleanup, planner, guard, history, security, controller tests + mocks |
+| `Sources/VoiceFlowTestKit` | 2 | `TestSuite`, `blockingAwait` |
+| `bundle/`, `Scripts/`, `Package.swift` | 4 | Info.plist, entitlements, build script, manifest |
+
+Commits (logical milestones):
+
+```
+9628b01 feat: foundation (models, protocols) + cleanup engine
+84eb93d feat: destination protection, insertion planner, history + settings store
+8817a9e feat: security/keychain, optional LLM cleanup, dictation controller
+428347d feat: macOS platform layer, menu bar app, and .app bundling
+```
+
+## 3. Test results
+
+`swift run VoiceFlowTests` → **72/72 passed**, exit 0. `swift build` → **0 warnings**
+under Swift 6 strict concurrency. Release `.app` builds and ad-hoc codesigns
+(hardened runtime, valid on disk). Full breakdown in `docs/VERIFICATION.md`.
+
+## 4. Remaining risks (please scrutinize)
+
+1. **Global hotkey correctness.** `GlobalHotkeyManager` decodes CGEvent flags and
+   keycodes for push-to-talk. Edge cases worth a close read: modifier-release
+   while the main key is still down; the default ⌥Space possibly conflicting with
+   system input-source switching; `.listenOnly` tap semantics. *(Not unit-tested —
+   needs a live event tap + AX permission.)*
+2. **Accessibility insertion across apps.** `AccessibilityTextInserter` tries
+   `kAXSelectedTextAttribute` then `kAXValueAttribute`. Electron/Chromium web
+   views and some Cocoa text views expose AX inconsistently; the clipboard-paste
+   fallback covers most, but please sanity-check the fallback ordering and the
+   150 ms clipboard-restore delay (a race window exists if the user copies during
+   that window).
+3. **Speech buffer path.** `SpeechTranscriber` reconstructs a single PCM buffer
+   from captured samples and runs one non-streaming recognition. Very long
+   dictations or a sample-rate mismatch between capture and the recognizer are
+   the risk areas.
+4. **Secure-field detection completeness.** Detection relies on
+   `AXSecureTextField` subrole/role. A non-standard secure field that doesn't
+   advertise that subrole could be missed. The design mitigates by *also* honoring
+   per-app `forceCopyOnly`.
+5. **Concurrency at the hotkey→actor boundary.** The tap callback hops to
+   `@MainActor` then into the `DictationController` actor via `Task`. Rapid
+   press/release could interleave `begin`/`finish`; controller guards with
+   `pendingSnapshot`/`isRecording`, but please review for a lost-update.
+
+## 5. Known limitations
+
+- **Requires manual permission grants** (Microphone, Speech Recognition,
+  Accessibility) on first launch — expected for this class of app; the spec lists
+  manual macOS permissions as an allowed stop condition.
+- **Ad-hoc signed only.** No Developer ID / notarization (no full Xcode / cert in
+  this environment). Fine for personal local use; Gatekeeper will warn on first open.
+- **On-device transcription quality** depends on the installed macOS speech
+  assets for the chosen locale.
+- **LLM cleanup** requires the user to add an Anthropic API key (Keychain);
+  absent a key it silently uses the offline rule engine (by design). Default
+  cleanup model is `claude-haiku-4-5` (latency-oriented), configurable.
+- **No launch-at-login implementation yet** — the setting is persisted but the
+  `SMAppService` registration is a follow-up (flagged, not wired).
+
+## 6. Suggested review checklist for Codex
+
+- [ ] Reproduce: `swift build` (0 warnings) and `swift run VoiceFlowTests` (72 pass).
+- [ ] Read `DictationController.finishRecording` — confirm destination is
+      re-verified *after* transcription/cleanup and *before* insertion, and that
+      every failure path degrades to copy-only (never a wrong-app write).
+- [ ] Confirm there is **no** synthetic Return / Enter / message-send anywhere
+      (`grep -rn "kVK_Return\|\.enter\|send(" Sources` should find nothing that sends).
+- [ ] Audit `AccessibilityTextInserter` for the secure-field guard and the
+      clipboard-restore race.
+- [ ] Audit `GlobalHotkeyManager.modifiersMatch` / `handle` for the edge cases in §4.1.
+- [ ] Audit `VocabularyReplacer` for correctness on overlapping/adjacent phrases
+      and regex-special written forms (there are tests — try to break them).
+- [ ] Audit `SQLiteHistoryStore` for SQL injection (prepared statements only?),
+      resource leaks (every `sqlite3_stmt` finalized?), and the `trim` query.
+- [ ] Sanity-check Swift 6 `Sendable`/`@unchecked Sendable` uses in the stores and
+      platform impls for real data races.
+- [ ] Spot-check the Anthropic request shape in `AnthropicTransport` against the
+      current Messages API (endpoint, headers, body).
+
+Report findings as a list; fixes will be applied in the worktree and verification
+re-run until clean.

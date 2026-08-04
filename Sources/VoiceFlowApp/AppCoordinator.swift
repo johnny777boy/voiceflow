@@ -21,6 +21,7 @@ final class AppCoordinator: ObservableObject {
     private let history: HistoryStoring
     private let secureStore: SecureStoring
     private let overlay = OverlayController()
+    private var didStart = false
 
     init() {
         let settingsStore = SettingsStore()
@@ -58,6 +59,8 @@ final class AppCoordinator: ObservableObject {
     // MARK: - Lifecycle
 
     func start() {
+        guard !didStart else { return }   // idempotent: safe if invoked more than once
+        didStart = true
         accessibilityGranted = AX.hasAccessibilityPermission(prompt: true)
         Task { await requestPermissions() }
         registerHotkey()

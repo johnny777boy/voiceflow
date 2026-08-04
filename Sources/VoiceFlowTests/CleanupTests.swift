@@ -29,6 +29,14 @@ func runCleanupTests(_ s: TestSuite) {
         s.expectEqual(out, "This is a test.")
     }
 
+    s.test("Clean writing preserves meaningful words that look like fillers") { s in
+        // "like", "actually", "kind of" carry meaning — must NOT be stripped.
+        let out = engine.cleanSync("i actually like it kind of a lot", context: ctx(.cleanWriting))
+        s.expect(out.lowercased().contains("like"), "kept 'like': \(out)")
+        s.expect(out.lowercased().contains("actually"), "kept 'actually': \(out)")
+        s.expect(out.lowercased().contains("kind of"), "kept 'kind of': \(out)")
+    }
+
     s.test("Clean writing converts spoken punctuation") { s in
         let out = engine.cleanSync("hello there comma how are you question mark", context: ctx(.cleanWriting))
         s.expectEqual(out, "Hello there, how are you?")
