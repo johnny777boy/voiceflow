@@ -18,6 +18,7 @@ final class AppCoordinator: ObservableObject {
     @Published private(set) var accessibilityGranted = false
     @Published private(set) var microphoneGranted = false
     @Published private(set) var speechGranted = false
+    @Published private(set) var inputMonitoringGranted = false
 
     private let controller: DictationController
     private let live: LiveSpeechDictation
@@ -80,17 +81,26 @@ final class AppCoordinator: ObservableObject {
         didStart = true
         refreshPermissionStatus()
         _ = AX.hasAccessibilityPermission(prompt: true)   // nudge the AX prompt once
+        InputMonitoring.request()                         // nudge the Input Monitoring prompt
         Task { await requestPermissions() }
         registerHotkey()
         LoginItemManager.setEnabled(settings.launchAtLogin)
         refreshHistory()
 
         // Re-check permissions whenever the app is refocused (e.g. after the user
-        // toggles a permission in System Settings), so banners aren't stale.
+        // toggles a permission in System Settings), so banners aren't stale — and
+        // (re)register the global hotkey once its permissions are granted, since the
+        // event tap can only be created after Accessibility/Input Monitoring exist.
         NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.refreshPermissionStatus() }
+            Task { @MainActor in
+                guard let self else { return }
+                self.refreshPermissionStatus()
+                if self.accessibilityGranted, self.inputMonitoringGranted, !self.hotkeys.isActive {
+                    self.registerHotkey()
+                }
+            }
         }
     }
 
@@ -98,6 +108,7 @@ final class AppCoordinator: ObservableObject {
         accessibilityGranted = AX.hasAccessibilityPermission(prompt: false)
         microphoneGranted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
         speechGranted = SFSpeechRecognizer.authorizationStatus() == .authorized
+        inputMonitoringGranted = InputMonitoring.isGranted()
     }
 
     private func requestPermissions() async {

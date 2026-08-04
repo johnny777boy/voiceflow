@@ -12,6 +12,9 @@ final class GlobalHotkeyManager: HotkeyManaging, @unchecked Sendable {
     private var handler: (@Sendable (HotkeyEvent) -> Void)?
     private var isChordDown = false
 
+    /// Whether a live event tap currently exists (i.e. registration succeeded).
+    var isActive: Bool { eventTap != nil }
+
     func register(_ configuration: HotkeyConfiguration, handler: @escaping @Sendable (HotkeyEvent) -> Void) {
         unregister()
         self.configuration = configuration

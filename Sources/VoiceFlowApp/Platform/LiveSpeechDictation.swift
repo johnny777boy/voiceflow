@@ -76,6 +76,7 @@ final class LiveSpeechDictation: AudioRecording, Transcribing, @unchecked Sendab
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
         request.taskHint = .dictation
+        request.addsPunctuation = true   // periods, commas, question marks from the recognizer
         if recognizer.supportsOnDeviceRecognition { request.requiresOnDeviceRecognition = true }
         self.request = request
 

@@ -14,7 +14,8 @@ struct HomeView: View {
     var body: some View {
         VStack(spacing: 18) {
             header
-            if !coordinator.microphoneGranted || !coordinator.speechGranted || !coordinator.accessibilityGranted {
+            if !coordinator.microphoneGranted || !coordinator.speechGranted
+                || !coordinator.accessibilityGranted || !coordinator.inputMonitoringGranted {
                 permissionBanner
             }
             talkButton
@@ -65,6 +66,9 @@ struct HomeView: View {
             }
             if !coordinator.accessibilityGranted {
                 permissionRow("Accessibility", "hand.point.up.left.fill", "Needed for the global hotkey and inserting into other apps.", "Privacy_Accessibility")
+            }
+            if !coordinator.inputMonitoringGranted {
+                permissionRow("Input Monitoring", "keyboard", "Needed for the global push-to-talk key.", "Privacy_ListenEvent")
             }
         }
         .padding(10)

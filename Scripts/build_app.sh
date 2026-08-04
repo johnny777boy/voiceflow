@@ -31,15 +31,25 @@ if [[ -f "$ROOT/bundle/AppIcon.icns" ]]; then
   cp "$ROOT/bundle/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 fi
 
-echo "==> Ad-hoc codesigning…"
-codesign --force --deep \
-  --sign - \
-  --entitlements "$ROOT/bundle/VoiceFlow.entitlements" \
-  --options runtime \
-  "$APP" 2>/dev/null || \
-codesign --force --deep --sign - \
-  --entitlements "$ROOT/bundle/VoiceFlow.entitlements" \
-  "$APP"
+# Prefer a STABLE local signing identity so macOS permission grants (Microphone,
+# Speech, Accessibility, Input Monitoring) persist across rebuilds. Falls back to
+# ad-hoc if the identity isn't set up (see Scripts/setup_signing.sh).
+SIGN_IDENTITY="VoiceFlow Local Signing"
+SIGN_KEYCHAIN="voiceflow-signing.keychain"
+SIGN_KEYCHAIN_PW="voiceflow"
+ENTITLEMENTS="$ROOT/bundle/VoiceFlow.entitlements"
+
+if security find-identity -p codesigning "$SIGN_KEYCHAIN" 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
+  echo "==> Codesigning with stable identity '$SIGN_IDENTITY' (permissions persist)…"
+  security unlock-keychain -p "$SIGN_KEYCHAIN_PW" "$SIGN_KEYCHAIN" 2>/dev/null || true
+  codesign --force --deep \
+    --sign "$SIGN_IDENTITY" --keychain "$SIGN_KEYCHAIN" \
+    --entitlements "$ENTITLEMENTS" --options runtime "$APP"
+else
+  echo "==> Ad-hoc codesigning (permissions reset each rebuild; run Scripts/setup_signing.sh for stable signing)…"
+  codesign --force --deep --sign - --entitlements "$ENTITLEMENTS" --options runtime "$APP" 2>/dev/null || \
+  codesign --force --deep --sign - --entitlements "$ENTITLEMENTS" "$APP"
+fi
 
 echo "==> Verifying…"
 codesign --verify --verbose "$APP" || true
