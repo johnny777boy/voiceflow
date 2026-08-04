@@ -1,0 +1,22 @@
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# Worktrees (managed by dev workflow)
+.worktrees/
+
+# macOS
+.DS_Store
+
+# Xcode (not used, but ignore just in case)
+*.xcodeproj/xcuserdata/
+DerivedData/
+
+# Build artifacts / app bundle output
+dist/
+*.app
+
+# Secrets
+*.env
+secrets/
