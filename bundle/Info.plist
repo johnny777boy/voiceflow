@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>VoiceFlow</string>
+    <key>CFBundleDisplayName</key>
+    <string>VoiceFlow</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.voiceflow.dictation</string>
+    <key>CFBundleExecutable</key>
+    <string>VoiceFlow</string>
+    <key>CFBundleVersion</key>
+    <string>1.0.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <!-- Menu-bar-only app: no Dock icon, no main window. -->
+    <key>LSUIElement</key>
+    <true/>
+    <!-- TCC usage descriptions (required before the OS will prompt). -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>VoiceFlow records audio while you hold the dictation hotkey so it can transcribe your speech.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>VoiceFlow uses on-device speech recognition to turn your dictation into text.</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>Personal use.</string>
+</dict>
+</plist>
