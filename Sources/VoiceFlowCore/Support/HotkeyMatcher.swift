@@ -6,11 +6,12 @@ public struct ModifierSet: OptionSet, Sendable, Hashable {
     public let rawValue: Int
     public init(rawValue: Int) { self.rawValue = rawValue }
 
-    public static let command  = ModifierSet(rawValue: 1 << 0)
-    public static let option   = ModifierSet(rawValue: 1 << 1)
-    public static let control  = ModifierSet(rawValue: 1 << 2)
-    public static let shift    = ModifierSet(rawValue: 1 << 3)
-    public static let function = ModifierSet(rawValue: 1 << 4)   // the fn / Globe key
+    public static let command    = ModifierSet(rawValue: 1 << 0)
+    public static let option     = ModifierSet(rawValue: 1 << 1)
+    public static let control    = ModifierSet(rawValue: 1 << 2)
+    public static let shift      = ModifierSet(rawValue: 1 << 3)
+    public static let function   = ModifierSet(rawValue: 1 << 4)   // the fn / Globe key
+    public static let leftOption = ModifierSet(rawValue: 1 << 5)   // the LEFT ⌥ specifically
 }
 
 /// Pure hotkey-matching logic shared between the production event tap and tests.
@@ -25,17 +26,19 @@ public enum HotkeyMatcher {
     public static let carbonShift: UInt32   = 0x0200
     public static let carbonOption: UInt32  = 0x0800
     public static let carbonControl: UInt32 = 0x1000
-    /// Custom sentinel (outside the Carbon range) for the fn / Globe key.
-    public static let carbonFunction: UInt32 = 0x0080_0000
+    /// Custom sentinels (outside the Carbon range).
+    public static let carbonFunction: UInt32   = 0x0080_0000   // fn / Globe
+    public static let carbonLeftOption: UInt32 = 0x0100_0000   // LEFT ⌥ specifically
 
     /// Convert a Carbon-style modifier mask into a `ModifierSet`.
     public static func decode(carbonMask: UInt32) -> ModifierSet {
         var set: ModifierSet = []
-        if carbonMask & carbonCommand  != 0 { set.insert(.command) }
-        if carbonMask & carbonShift    != 0 { set.insert(.shift) }
-        if carbonMask & carbonOption   != 0 { set.insert(.option) }
-        if carbonMask & carbonControl  != 0 { set.insert(.control) }
-        if carbonMask & carbonFunction != 0 { set.insert(.function) }
+        if carbonMask & carbonCommand    != 0 { set.insert(.command) }
+        if carbonMask & carbonShift      != 0 { set.insert(.shift) }
+        if carbonMask & carbonOption     != 0 { set.insert(.option) }
+        if carbonMask & carbonControl    != 0 { set.insert(.control) }
+        if carbonMask & carbonFunction   != 0 { set.insert(.function) }
+        if carbonMask & carbonLeftOption != 0 { set.insert(.leftOption) }
         return set
     }
 

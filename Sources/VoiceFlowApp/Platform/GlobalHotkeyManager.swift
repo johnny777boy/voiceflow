@@ -152,6 +152,8 @@ final class GlobalHotkeyManager: HotkeyManaging, @unchecked Sendable {
         if flags.contains(.maskControl) { set.insert(.control) }
         if flags.contains(.maskShift) { set.insert(.shift) }
         if flags.contains(.maskSecondaryFn) { set.insert(.function) }   // fn / Globe
+        // Device-dependent bit: LEFT ⌥ is NX_DEVICELALTKEYMASK (0x20).
+        if (flags.rawValue & 0x20) != 0 { set.insert(.leftOption) }
         return set
     }
 }
