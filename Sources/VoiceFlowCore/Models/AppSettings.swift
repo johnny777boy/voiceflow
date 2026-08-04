@@ -96,12 +96,13 @@ public struct HotkeyConfiguration: Codable, Sendable, Equatable, Hashable {
         self.isPushToTalk = isPushToTalk
     }
 
-    /// Default: hold the fn (Globe) key alone to talk — a single key, like Wispr
-    /// Flow. `keyCode == nil` marks a pure-modifier trigger driven by flag changes.
+    /// Default: hold the LEFT Option (⌥) key alone to talk — a single key that
+    /// doesn't type. `keyCode == nil` marks a pure-modifier trigger driven by flag
+    /// changes; the LEFT-specific sentinel keeps the right ⌥ free for typing.
     public static let defaultPushToTalk = HotkeyConfiguration(
         keyCode: nil,
-        modifierFlags: HotkeyMatcher.carbonFunction,
-        displayString: "🌐 fn",
+        modifierFlags: HotkeyMatcher.carbonLeftOption,
+        displayString: "⌥ Left Option",
         isPushToTalk: true
     )
 }

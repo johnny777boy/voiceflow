@@ -61,20 +61,23 @@ struct HotkeyRecorderView: View {
         capturing = false
     }
 
-    /// Build a pure-modifier (single-key hold) config when exactly one modifier
-    /// is currently held. Returns nil otherwise (e.g. on release, or a combo).
+    /// Build a pure-modifier (single-key hold) config from the physical modifier
+    /// key that changed. Uses the key code to tell LEFT vs RIGHT where it matters,
+    /// and only captures on press (the modifier is currently held). nil otherwise.
     static func pureModifier(from event: NSEvent, isPushToTalk: Bool) -> HotkeyConfiguration? {
         let f = event.modifierFlags
-        var mask: UInt32 = 0
-        var glyph = ""
-        var count = 0
-        if f.contains(.function) { mask |= HotkeyMatcher.carbonFunction; glyph = "🌐 fn"; count += 1 }
-        if f.contains(.command)  { mask |= HotkeyMatcher.carbonCommand;  glyph = "⌘"; count += 1 }
-        if f.contains(.option)   { mask |= HotkeyMatcher.carbonOption;   glyph = "⌥"; count += 1 }
-        if f.contains(.control)  { mask |= HotkeyMatcher.carbonControl;  glyph = "⌃"; count += 1 }
-        if f.contains(.shift)    { mask |= HotkeyMatcher.carbonShift;    glyph = "⇧"; count += 1 }
-        guard count == 1 else { return nil }
-        return HotkeyConfiguration(keyCode: nil, modifierFlags: mask, displayString: glyph, isPushToTalk: isPushToTalk)
+        func cfg(_ mask: UInt32, _ glyph: String) -> HotkeyConfiguration {
+            HotkeyConfiguration(keyCode: nil, modifierFlags: mask, displayString: glyph, isPushToTalk: isPushToTalk)
+        }
+        switch event.keyCode {
+        case 58: return f.contains(.option)   ? cfg(HotkeyMatcher.carbonLeftOption, "⌥ Left Option") : nil
+        case 61: return f.contains(.option)   ? cfg(HotkeyMatcher.carbonOption, "⌥ Right Option") : nil
+        case 63: return f.contains(.function) ? cfg(HotkeyMatcher.carbonFunction, "🌐 fn") : nil
+        case 55, 54: return f.contains(.command) ? cfg(HotkeyMatcher.carbonCommand, "⌘") : nil
+        case 59, 62: return f.contains(.control) ? cfg(HotkeyMatcher.carbonControl, "⌃") : nil
+        case 56, 60: return f.contains(.shift)   ? cfg(HotkeyMatcher.carbonShift, "⇧") : nil
+        default: return nil
+        }
     }
 
     // MARK: - Event → HotkeyConfiguration

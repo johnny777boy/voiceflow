@@ -53,14 +53,15 @@ func runHotkeyTests(_ s: TestSuite) {
         s.expectFalse(HotkeyMatcher.shouldEndChord(isChordDown: true, isPushToTalk: false, modifiersStillMatch: false))
     }
 
-    s.test("default hotkey is a single fn-key hold") { s in
+    s.test("default hotkey is a single left-Option hold") { s in
         let config = HotkeyConfiguration.defaultPushToTalk
-        s.expectEqual(HotkeyMatcher.decode(carbonMask: config.modifierFlags), [.function])
+        s.expectEqual(HotkeyMatcher.decode(carbonMask: config.modifierFlags), [.leftOption])
         s.expectNil(config.keyCode)   // pure-modifier trigger
         s.expect(config.isPushToTalk)
     }
 
-    s.test("decode maps the fn sentinel to .function") { s in
+    s.test("decode maps the fn and left-option sentinels") { s in
         s.expectEqual(HotkeyMatcher.decode(carbonMask: HotkeyMatcher.carbonFunction), [.function])
+        s.expectEqual(HotkeyMatcher.decode(carbonMask: HotkeyMatcher.carbonLeftOption), [.leftOption])
     }
 }

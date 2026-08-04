@@ -35,6 +35,7 @@ final class AppCoordinator: ObservableObject {
     /// than dropped (which a simple busy-latch would do).
     private var recordingIntent = false
     private var reconciling = false
+    private var recordingStartedAt: Date?
 
     init() {
         let settingsStore = SettingsStore()
@@ -223,6 +224,7 @@ final class AppCoordinator: ObservableObject {
         do {
             try await controller.beginRecording()
             isRecording = true
+            recordingStartedAt = Date()
             statusText = "Listening…"
             overlay.show(state: .recording)
         } catch {
@@ -234,6 +236,16 @@ final class AppCoordinator: ObservableObject {
 
     private func finishRecordingTransition() async {
         isRecording = false
+        // Safety rail: ignore very short holds (e.g. a quick key-tap while typing)
+        // so they never record, transcribe, or insert anything.
+        if let started = recordingStartedAt, Date().timeIntervalSince(started) < 0.4 {
+            recordingStartedAt = nil
+            await controller.cancelRecording()
+            statusText = "Ready"
+            overlay.hide()
+            return
+        }
+        recordingStartedAt = nil
         statusText = "Transcribing…"
         overlay.show(state: .processing)
         do {
