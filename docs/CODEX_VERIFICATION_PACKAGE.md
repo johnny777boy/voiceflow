@@ -14,7 +14,7 @@ How to reproduce locally:
 ```bash
 git checkout feature/system-dictation-daily-use
 swift build            # expect: Build complete, 0 warnings
-swift run VoiceFlowTests   # expect: "All 72 tests passed", exit 0
+swift run VoiceFlowTests   # expect: "All 78 tests passed", exit 0
 ./Scripts/build_app.sh release   # expect: dist/VoiceFlow.app, ad-hoc signed
 ```
 
@@ -54,7 +54,7 @@ See `docs/ARCHITECTURE.md` for the full design.
 
 ## 2. Files changed
 
-61 files added on the branch (0 deletions vs `main`). By area:
+65 files added + README updated on the branch (0 deletions vs `main`). By area:
 
 | Area | Files | Key contents |
 |------|:----:|--------------|
@@ -65,10 +65,10 @@ See `docs/ARCHITECTURE.md` for the full design.
 | `Sources/VoiceFlowCore/Insertion` | 1 | `InsertionPlanner` |
 | `Sources/VoiceFlowCore/History` | 3 | `SQLiteHistoryStore`, `InMemoryHistoryStore`, `SettingsStore` |
 | `Sources/VoiceFlowCore/Security` | 1 | `KeychainStore` |
-| `Sources/VoiceFlowCore/Support` | 5 | errors, logging, clock, app paths, info; `DictationController` at core root |
-| `Sources/VoiceFlowApp/Platform` | 6 | `AudioEngineRecorder`, `SpeechTranscriber`, `GlobalHotkeyManager`, `AccessibilityTextInserter`, `WorkspaceActiveAppProvider`, `AccessibilityBridge` |
+| `Sources/VoiceFlowCore/Support` | 6 | errors, logging, clock, app paths, info, `HotkeyMatcher`; `DictationController` at core root |
+| `Sources/VoiceFlowApp/Platform` | 7 | `AudioEngineRecorder`, `SpeechTranscriber`, `GlobalHotkeyManager`, `AccessibilityTextInserter`, `WorkspaceActiveAppProvider`, `AccessibilityBridge`, `LoginItemManager` |
 | `Sources/VoiceFlowApp/UI` + root | 6 | `AppMain`, `AppCoordinator`, `MenuContentView`, `SettingsView`, `OverlayController`, `OverlayView` |
-| `Sources/VoiceFlowTests` | 9 | Model, vocabulary, cleanup, planner, guard, history, security, controller tests + mocks |
+| `Sources/VoiceFlowTests` | 10 | Model, vocabulary, cleanup, planner, guard, history, security, hotkey, controller tests + mocks |
 | `Sources/VoiceFlowTestKit` | 2 | `TestSuite`, `blockingAwait` |
 | `bundle/`, `Scripts/`, `Package.swift` | 4 | Info.plist, entitlements, build script, manifest |
 
@@ -83,17 +83,18 @@ Commits (logical milestones):
 
 ## 3. Test results
 
-`swift run VoiceFlowTests` → **72/72 passed**, exit 0. `swift build` → **0 warnings**
+`swift run VoiceFlowTests` → **78/78 passed**, exit 0. `swift build` → **0 warnings**
 under Swift 6 strict concurrency. Release `.app` builds and ad-hoc codesigns
 (hardened runtime, valid on disk). Full breakdown in `docs/VERIFICATION.md`.
 
 ## 4. Remaining risks (please scrutinize)
 
-1. **Global hotkey correctness.** `GlobalHotkeyManager` decodes CGEvent flags and
-   keycodes for push-to-talk. Edge cases worth a close read: modifier-release
-   while the main key is still down; the default ⌥Space possibly conflicting with
-   system input-source switching; `.listenOnly` tap semantics. *(Not unit-tested —
-   needs a live event tap + AX permission.)*
+1. **Global hotkey correctness.** The pure matching logic (Carbon-mask decode +
+   trigger decision) is now factored into `HotkeyMatcher` in the core and is
+   **unit-tested** (6 cases). What remains untested is the live-event glue in
+   `GlobalHotkeyManager`: modifier-release while the main key is still down; the
+   default ⌥Space possibly conflicting with system input-source switching;
+   `.listenOnly` tap semantics. *(These need a live event tap + AX permission.)*
 2. **Accessibility insertion across apps.** `AccessibilityTextInserter` tries
    `kAXSelectedTextAttribute` then `kAXValueAttribute`. Electron/Chromium web
    views and some Cocoa text views expose AX inconsistently; the clipboard-paste
@@ -125,12 +126,13 @@ under Swift 6 strict concurrency. Release `.app` builds and ad-hoc codesigns
 - **LLM cleanup** requires the user to add an Anthropic API key (Keychain);
   absent a key it silently uses the offline rule engine (by design). Default
   cleanup model is `claude-haiku-4-5` (latency-oriented), configurable.
-- **No launch-at-login implementation yet** — the setting is persisted but the
-  `SMAppService` registration is a follow-up (flagged, not wired).
+- **Launch-at-login** is wired via `SMAppService` (`LoginItemManager`), applied
+  at startup and on settings change. It only takes effect from the installed
+  `.app` bundle (SMAppService requires a bundle), not a bare `swift run`.
 
 ## 6. Suggested review checklist for Codex
 
-- [ ] Reproduce: `swift build` (0 warnings) and `swift run VoiceFlowTests` (72 pass).
+- [ ] Reproduce: `swift build` (0 warnings) and `swift run VoiceFlowTests` (78 pass).
 - [ ] Read `DictationController.finishRecording` — confirm destination is
       re-verified *after* transcription/cleanup and *before* insertion, and that
       every failure path degrades to copy-only (never a wrong-app write).

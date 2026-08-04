@@ -13,7 +13,7 @@ self-review, run all tests, run static analysis, and record the results.
 
 | Requirement | Status | Evidence |
 |-------------|:------:|----------|
-| System-wide shortcut | ✅ code-complete | `GlobalHotkeyManager` (CGEvent tap, push-to-talk + toggle). Requires Accessibility permission at runtime. |
+| System-wide shortcut | ✅ verified (logic) + code-complete (glue) | `HotkeyMatcher` (decode + trigger) unit-tested; `GlobalHotkeyManager` (CGEvent tap) wires it. Requires Accessibility permission at runtime. |
 | Recording | ✅ code-complete | `AudioEngineRecorder` (AVAudioEngine tap). |
 | Transcription | ✅ code-complete | `SpeechTranscriber` (on-device `SFSpeechRecognizer`). |
 | Cleanup | ✅ verified | `RuleBasedCleanup` + `CleanupPipeline`; 20 cleanup/vocabulary tests. |
@@ -24,7 +24,7 @@ self-review, run all tests, run static analysis, and record the results.
 | Email | ✅ verified | Email mode preserves line breaks, polishes prose (controller test). |
 | Browser text fields | ✅ code-complete | AX insertion + clipboard paste fallback for web fields. |
 | History | ✅ verified | `SQLiteHistoryStore` + `InMemoryHistoryStore`; 15 history tests incl. persistence across reopen. |
-| Tests pass | ✅ | 72/72 (below). |
+| Tests pass | ✅ | 78/78 (below). |
 | Internal verification | ✅ | This document. |
 | Never auto-sends | ✅ verified | Controller only inserts/copies; no Return synthesis anywhere in the codebase. |
 | Never pastes into password fields | ✅ verified | Secure-field test asserts no insertion. |
@@ -37,7 +37,7 @@ are covered by manual compatibility testing (§4), not unit tests.
 
 ```
 $ swift run VoiceFlowTests
-✓ All 72 tests passed.
+✓ All 78 tests passed.
 ```
 
 Exit code `0`. The runner exits non-zero on any failure (CI-compatible).
@@ -53,8 +53,9 @@ Coverage by area:
 | Destination guard | 5 |
 | History stores + settings store | 15 |
 | Security / Keychain contract / LLM provider | 10 |
+| Hotkey matcher (modifier decode + trigger logic) | 6 |
 | Dictation controller (end-to-end with mocks) | 7 |
-| **Total executed** | **72** |
+| **Total executed** | **78** |
 
 Notable behaviors proven by tests:
 
@@ -101,7 +102,7 @@ dictations, no critical failures**):
 ## 5. Conclusion
 
 Internal verification **passes**: the build is clean under strict concurrency,
-all 72 automated tests pass, the release `.app` bundles and signs, and a
+all 78 automated tests pass, the release `.app` bundles and signs, and a
 self-review confirms every Definition-of-Done item is implemented. Items that
 depend on live macOS permissions are code-complete and enumerated for manual
 acceptance. Proceed to external (Codex) verification —

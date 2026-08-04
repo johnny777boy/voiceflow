@@ -16,6 +16,7 @@ runInsertionPlannerTests(suite)
 runDestinationGuardTests(suite)
 runHistoryStoreTests(suite)
 runSecurityTests(suite)
+runHotkeyTests(suite)
 runControllerTests(suite)
 
 suite.finish()

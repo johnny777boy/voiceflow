@@ -64,6 +64,7 @@ final class AppCoordinator: ObservableObject {
         accessibilityGranted = AX.hasAccessibilityPermission(prompt: true)
         Task { await requestPermissions() }
         registerHotkey()
+        LoginItemManager.setEnabled(settings.launchAtLogin)
         refreshHistory()
     }
 
@@ -135,10 +136,13 @@ final class AppCoordinator: ObservableObject {
     // MARK: - Settings & history
 
     func applySettings(_ new: AppSettings) {
+        let hotkeyChanged = new.hotkey != settings.hotkey
+        let loginChanged = new.launchAtLogin != settings.launchAtLogin
         settings = new
         try? settingsStore.save(new)
         Task { await controller.updateSettings(new) }
-        registerHotkey()
+        if hotkeyChanged { registerHotkey() }
+        if loginChanged { LoginItemManager.setEnabled(new.launchAtLogin) }
     }
 
     func setAPIKey(_ key: String) {

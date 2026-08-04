@@ -66,7 +66,10 @@ final class GlobalHotkeyManager: HotkeyManaging, @unchecked Sendable {
         guard let config = configuration, let handler else { return }
         let keyCode = UInt32(event.getIntegerValueField(.keyboardEventKeycode))
         guard config.keyCode == nil || config.keyCode == keyCode else { return }
-        guard modifiersMatch(event.flags, carbonMask: config.modifierFlags) else {
+
+        let present = Self.modifierSet(from: event.flags)
+        let required = HotkeyMatcher.decode(carbonMask: config.modifierFlags)
+        guard HotkeyMatcher.matches(required: required, present: present) else {
             // Chord broken (modifier released): treat as release for push-to-talk.
             if type == .keyUp && isChordDown && config.isPushToTalk {
                 isChordDown = false
@@ -92,14 +95,13 @@ final class GlobalHotkeyManager: HotkeyManaging, @unchecked Sendable {
         }
     }
 
-    /// Whether the event's modifier flags satisfy the required Carbon modifier mask.
-    private func modifiersMatch(_ flags: CGEventFlags, carbonMask: UInt32) -> Bool {
-        func require(_ carbon: Int, _ cg: CGEventFlags) -> Bool {
-            (carbonMask & UInt32(carbon)) == 0 || flags.contains(cg)
-        }
-        return require(cmdKey, .maskCommand)
-            && require(optionKey, .maskAlternate)
-            && require(controlKey, .maskControl)
-            && require(shiftKey, .maskShift)
+    /// Map live CGEvent modifier flags into the platform-agnostic `ModifierSet`.
+    private static func modifierSet(from flags: CGEventFlags) -> ModifierSet {
+        var set: ModifierSet = []
+        if flags.contains(.maskCommand) { set.insert(.command) }
+        if flags.contains(.maskAlternate) { set.insert(.option) }
+        if flags.contains(.maskControl) { set.insert(.control) }
+        if flags.contains(.maskShift) { set.insert(.shift) }
+        return set
     }
 }

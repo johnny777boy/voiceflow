@@ -13,7 +13,7 @@ These are the exact steps for you to run **after** internal verification passes
 
 ## 0. Pre-merge gate
 
-- [x] Internal verification passes (`swift build` clean, `swift run VoiceFlowTests` → 72/72).
+- [x] Internal verification passes (`swift build` clean, `swift run VoiceFlowTests` → 78/78).
 - [ ] Codex external verification passes (hand it `docs/CODEX_VERIFICATION_PACKAGE.md`; fix any findings in the worktree; re-run verification until clean).
 - [ ] You approve.
 
@@ -24,7 +24,7 @@ cd /Users/yoni/Documents/projects/VoiceFlow/.worktrees/feature-system-dictation-
 swift build && swift run VoiceFlowTests
 ```
 
-Expect `Build complete!` (0 warnings) and `✓ All 72 tests passed.`
+Expect `Build complete!` (0 warnings) and `✓ All 78 tests passed.`
 
 Optionally build and launch the app once:
 
@@ -92,4 +92,4 @@ git branch -d feature/system-dictation-daily-use
 - Full domain logic + macOS platform layer + SwiftUI menu-bar UI.
 - `bundle/` (Info.plist, entitlements) and `Scripts/build_app.sh`.
 - `docs/` (architecture, verification, Codex package, these instructions).
-- 72 passing tests; 0 build warnings under Swift 6 strict concurrency.
+- 78 passing tests; 0 build warnings under Swift 6 strict concurrency.
