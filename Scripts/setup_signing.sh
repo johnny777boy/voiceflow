@@ -43,11 +43,11 @@ EOF
   echo "Created signing identity '$CN'."
 fi
 
-# Ensure the keychain is on the user search list so codesign can find it.
-CURRENT=$(security list-keychains -d user | sed 's/[" ]//g' | tr '\n' ' ')
-case "$CURRENT" in
-  *"$KC"*) : ;;
-  *) security list-keychains -d user -s "$KC" $CURRENT ;;
-esac
+# Ensure the keychain is on the user search list so codesign can find it —
+# WITHOUT dropping the login keychain (which holds git/other credentials).
+# Set it explicitly to avoid fragile parsing of the existing list.
+security list-keychains -d user -s \
+  "$HOME/Library/Keychains/login.keychain-db" \
+  "$HOME/Library/Keychains/${KC}-db"
 
 echo "Done. Rebuild with ./Scripts/build_app.sh — permissions will now persist."
