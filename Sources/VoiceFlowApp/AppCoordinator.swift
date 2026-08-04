@@ -185,13 +185,17 @@ final class AppCoordinator: ObservableObject {
     }
 
     private func beginRecordingTransition() async {
-        // Gate on mic + speech permission first, with an actionable message.
-        if let message = await ensureCapturePermissions() {
-            recordingIntent = false
-            isRecording = false
-            statusText = message
-            overlay.show(state: .error(message))
-            return
+        // Gate on mic + speech permission — but only await the (possibly
+        // prompting) request path when they aren't already granted. When they
+        // are, we proceed synchronously so a prompt can't desync press/release.
+        if !(microphoneGranted && speechGranted) {
+            if let message = await ensureCapturePermissions() {
+                recordingIntent = false
+                isRecording = false
+                statusText = message
+                overlay.show(state: .error(message))
+                return
+            }
         }
         do {
             try await controller.beginRecording()
