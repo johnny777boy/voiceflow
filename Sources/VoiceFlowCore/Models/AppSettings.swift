@@ -96,11 +96,12 @@ public struct HotkeyConfiguration: Codable, Sendable, Equatable, Hashable {
         self.isPushToTalk = isPushToTalk
     }
 
-    /// Default: hold ⌥Space to talk. (0x31 == kVK_Space, 0x0800 == optionKey Carbon mask.)
+    /// Default: hold the fn (Globe) key alone to talk — a single key, like Wispr
+    /// Flow. `keyCode == nil` marks a pure-modifier trigger driven by flag changes.
     public static let defaultPushToTalk = HotkeyConfiguration(
-        keyCode: 0x31,
-        modifierFlags: 0x0800,
-        displayString: "⌥Space",
+        keyCode: nil,
+        modifierFlags: HotkeyMatcher.carbonFunction,
+        displayString: "🌐 fn",
         isPushToTalk: true
     )
 }

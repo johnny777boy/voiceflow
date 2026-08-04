@@ -87,9 +87,16 @@ final class GlobalHotkeyManager: HotkeyManaging, @unchecked Sendable {
         let modsOK = HotkeyMatcher.matches(
             required: HotkeyMatcher.decode(carbonMask: config.modifierFlags), present: present)
 
-        // A modifier changed (no key up/down). Only used to END a held
-        // push-to-talk chord. Never consumed — modifier keys must keep working.
+        // A modifier changed (no key up/down).
         if type == .flagsChanged {
+            if config.keyCode == nil && config.isPushToTalk {
+                // Single-key / pure-modifier hold-to-talk: the modifier IS the
+                // trigger. Press when it goes down, release when it comes up.
+                if modsOK && !isChordDown { isChordDown = true; handler(.pressed) }
+                else if !modsOK && isChordDown { isChordDown = false; handler(.released) }
+                return false   // never consume modifier events
+            }
+            // Keyed chord: a modifier change only ENDS a held chord.
             if HotkeyMatcher.shouldEndChord(isChordDown: isChordDown,
                                             isPushToTalk: config.isPushToTalk,
                                             modifiersStillMatch: modsOK) {
@@ -99,9 +106,10 @@ final class GlobalHotkeyManager: HotkeyManaging, @unchecked Sendable {
             return false
         }
 
-        // keyDown / keyUp: gate on the configured key code.
+        // From here on it's a keyed (non-pure-modifier) hotkey. Gate on the code.
+        guard let configuredKey = config.keyCode else { return false }
         let keyCode = UInt32(event.getIntegerValueField(.keyboardEventKeycode))
-        guard config.keyCode == nil || config.keyCode == keyCode else { return false }
+        guard configuredKey == keyCode else { return false }
 
         guard modsOK else {
             // Chord broken (modifier released together with a key event).
@@ -143,6 +151,7 @@ final class GlobalHotkeyManager: HotkeyManaging, @unchecked Sendable {
         if flags.contains(.maskAlternate) { set.insert(.option) }
         if flags.contains(.maskControl) { set.insert(.control) }
         if flags.contains(.maskShift) { set.insert(.shift) }
+        if flags.contains(.maskSecondaryFn) { set.insert(.function) }   // fn / Globe
         return set
     }
 }
