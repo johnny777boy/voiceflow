@@ -6,7 +6,6 @@ import VoiceFlowCore
 struct HomeView: View {
     @ObservedObject var coordinator: AppCoordinator
     @Environment(\.openSettings) private var openSettings
-    @State private var pressing = false
 
     private static let brand = LinearGradient(
         colors: [Color(red: 0.36, green: 0.42, blue: 0.98), Color(red: 0.58, green: 0.30, blue: 0.92)],
@@ -84,45 +83,40 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Talk button (hold to talk)
+    // MARK: - Talk button (tap to start/stop; hotkey is hold-to-talk)
 
     private var talkButton: some View {
         VStack(spacing: 12) {
             ZStack {
-                // Pulsing rings while recording.
+                // Static ring while recording (visual affordance).
                 if coordinator.isRecording {
-                    Circle().stroke(Color.red.opacity(0.35), lineWidth: 3)
-                        .scaleEffect(pressing || coordinator.isRecording ? 1.25 : 1)
-                        .opacity(0.0)
-                        .animation(.easeOut(duration: 1.1).repeatForever(autoreverses: false), value: coordinator.isRecording)
                     Circle().stroke(Color.red.opacity(0.25), lineWidth: 2)
-                        .scaleEffect(1.12)
+                        .scaleEffect(1.14)
                 }
-                Circle()
-                    .fill(coordinator.isRecording ? AnyShapeStyle(Color.red) : AnyShapeStyle(Self.brand))
-                    .frame(width: 132, height: 132)
-                    .shadow(color: (coordinator.isRecording ? Color.red : Color.blue).opacity(0.35), radius: 18, y: 8)
-                    .scaleEffect(pressing ? 0.94 : 1)
-                Image(systemName: coordinator.isRecording ? "waveform" : "mic.fill")
-                    .font(.system(size: 46, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .symbolEffect(.variableColor.iterative, isActive: coordinator.isRecording)
+                // Tap-to-toggle button: tap to start, tap again to stop.
+                Button(action: { coordinator.toggleRecording() }) {
+                    ZStack {
+                        Circle()
+                            .fill(coordinator.isRecording ? AnyShapeStyle(Color.red) : AnyShapeStyle(Self.brand))
+                            .frame(width: 132, height: 132)
+                            .shadow(color: (coordinator.isRecording ? Color.red : Color.blue).opacity(0.35), radius: 18, y: 8)
+                        Image(systemName: coordinator.isRecording ? "stop.fill" : "mic.fill")
+                            .font(.system(size: 44, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .symbolEffect(.variableColor.iterative, isActive: coordinator.isRecording)
+                    }
+                    .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .scaleEffect(coordinator.isRecording ? 1.04 : 1)
+                .animation(.spring(response: 0.3, dampingFraction: 0.6), value: coordinator.isRecording)
             }
             .frame(height: 160)
-            .contentShape(Circle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in
-                        if !pressing { pressing = true; coordinator.beginRecording() }
-                    }
-                    .onEnded { _ in
-                        pressing = false; coordinator.finishRecording()
-                    }
-            )
-            .animation(.spring(response: 0.3, dampingFraction: 0.6), value: pressing)
 
-            Text(coordinator.isRecording ? "Listening… release to insert" : "Hold to talk  ·  or press \(coordinator.settings.hotkey.displayString)")
-                .font(.callout).foregroundStyle(.secondary)
+            Text(coordinator.isRecording
+                 ? "Recording… tap to stop"
+                 : "Tap to start  ·  or hold \(coordinator.settings.hotkey.displayString)")
+                .font(.callout).foregroundStyle(coordinator.isRecording ? .red : .secondary)
         }
     }
 

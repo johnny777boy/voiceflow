@@ -20,6 +20,7 @@ final class AppCoordinator: ObservableObject {
     @Published private(set) var speechGranted = false
 
     private let controller: DictationController
+    private let live: LiveSpeechDictation
     private let hotkeys: GlobalHotkeyManager
     private let settingsStore: SettingsStore
     private let history: HistoryStoring
@@ -56,9 +57,14 @@ final class AppCoordinator: ObservableObject {
             llmProvider: LLMCleanupProvider(secureStore: secureStore),
             useLLM: loaded.useLLMCleanup
         )
+        // One live engine serves both the audio and transcription seams so
+        // recognition streams while you speak (captures full-length dictation).
+        let live = LiveSpeechDictation()
+        live.preferredLanguage = loaded.languageCode
+        self.live = live
         self.controller = DictationController(
-            audio: AudioEngineRecorder(),
-            transcriber: SpeechTranscriber(),
+            audio: live,
+            transcriber: live,
             cleanup: pipeline,
             inserter: AccessibilityTextInserter(),
             activeApp: WorkspaceActiveAppProvider(),
@@ -166,6 +172,12 @@ final class AppCoordinator: ObservableObject {
     func beginRecording() { recordingIntent = true; reconcile() }
     func finishRecording() { recordingIntent = false; reconcile() }
 
+    /// Tap-to-toggle for the in-app button: start if idle, stop if recording.
+    func toggleRecording() {
+        recordingIntent.toggle()
+        reconcile()
+    }
+
     /// Drive `isRecording` toward `recordingIntent`. Only one pass runs at a time;
     /// it loops because the intent may flip during an `await`.
     private func reconcile() {
@@ -240,6 +252,7 @@ final class AppCoordinator: ObservableObject {
         let loginChanged = new.launchAtLogin != settings.launchAtLogin
         settings = new
         try? settingsStore.save(new)
+        live.preferredLanguage = new.languageCode
         Task { await controller.updateSettings(new) }
         if hotkeyChanged { registerHotkey() }
         if loginChanged { LoginItemManager.setEnabled(new.launchAtLogin) }
