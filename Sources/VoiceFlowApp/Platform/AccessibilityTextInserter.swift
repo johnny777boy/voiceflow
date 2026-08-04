@@ -81,6 +81,9 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
 
     private func insertViaAccessibility(_ text: String) -> Bool {
         guard let focused = AX.focusedElement() else { return false }
+        // Re-check the *specific* element we are about to write: focus may have
+        // moved to a secure field since the guard in insert(). Never AX-set it.
+        if Self.isSecure(focused) { return false }
         // Prefer replacing the current selection (inserts at the caret).
         if AX.isSettable(focused, kAXSelectedTextAttribute) {
             if AX.setString(focused, kAXSelectedTextAttribute, text) { return true }

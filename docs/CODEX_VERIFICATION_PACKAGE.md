@@ -198,3 +198,30 @@ transport shape, and raised **four** defects. All four are now fixed on the bran
 Post-fix status: `swift build` → **0 warnings**, `swift run VoiceFlowTests` →
 **79/79 passed** (added `shouldEndChord` coverage). Release `.app` rebuilds and
 signs.
+
+## 8. Round 3 — residual fixes
+
+Codex's second pass found **two residual issues** (one a regression from the
+round-2 `busy` latch). Both are now fixed:
+
+1. **`busy` latch dropped `.released` events** (regression) — *fixed.*
+   Replaced the latch with an **intent → actual reconciler** in `AppCoordinator`.
+   Hotkey events set `recordingIntent` synchronously (never await) and kick
+   `reconcile()`, which runs one pass at a time and **re-reads the intent after
+   every `await`**. So `press → (release while begin is still awaiting) → begin
+   completes` now converges to *not recording* instead of getting stuck. A failed
+   begin breaks the loop (`if !isRecording`) to avoid spinning.
+   *Verify:* `AppCoordinator.handle` / `reconcile` / `beginRecordingTransition` /
+   `finishRecordingTransition`. Trace: press sets intent=true; a release during
+   the begin-await sets intent=false; after begin sets `isRecording=true`, the
+   loop sees `intent(false) != isRecording(true)` and runs finish → ends idle.
+
+2. **AX-set path didn't re-check the specific focused element** — *fixed.*
+   `insertViaAccessibility` now calls `Self.isSecure(focused)` on the exact element
+   it fetched and returns `false` (declining the AX write) if it's secure — mirror
+   of the paste-path guard. Focus moving to a secure element between the top-level
+   guard and the AX set can no longer result in a write.
+   *Verify:* `AccessibilityTextInserter.insertViaAccessibility`.
+
+Post-fix status: `swift build` → **0 warnings**, `swift run VoiceFlowTests` →
+**79/79 passed**. Release `.app` rebuilds and signs.

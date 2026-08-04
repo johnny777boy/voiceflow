@@ -22,9 +22,13 @@ final class AppCoordinator: ObservableObject {
     private let secureStore: SecureStoring
     private let overlay = OverlayController()
     private var didStart = false
-    /// Set synchronously before awaiting a recording transition, so rapid or
-    /// auto-repeating hotkey events can't interleave two begin/finish tasks.
-    private var busy = false
+    /// Desired recording state, set synchronously by hotkey events. A single
+    /// reconcile pass drives the *actual* recording toward this intent and
+    /// re-reads it after every async transition — so a release that arrives while
+    /// `beginRecording` is still awaiting is honored on the next loop turn rather
+    /// than dropped (which a simple busy-latch would do).
+    private var recordingIntent = false
+    private var reconciling = false
 
     init() {
         let settingsStore = SettingsStore()
@@ -79,45 +83,62 @@ final class AppCoordinator: ObservableObject {
 
     private func registerHotkey() {
         hotkeys.register(settings.hotkey) { [weak self] event in
-            // Hotkey callback arrives on the main run loop; hop to the actor via Task.
+            // Hotkey callback arrives on the main run loop; hop to the main actor.
             Task { @MainActor in
-                await self?.handle(event)
+                self?.handle(event)
             }
         }
     }
 
-    private func handle(_ event: HotkeyEvent) async {
+    /// Hotkey events only update the *intent* (synchronously), then kick a
+    /// reconcile. They never await, so no event is ever dropped mid-transition.
+    private func handle(_ event: HotkeyEvent) {
         switch event {
-        case .pressed:
-            await beginRecording()
-        case .released:
-            await finishRecording()
-        case .toggled:
-            if isRecording { await finishRecording() } else { await beginRecording() }
+        case .pressed:  recordingIntent = true
+        case .released: recordingIntent = false
+        case .toggled:  recordingIntent.toggle()
+        }
+        reconcile()
+    }
+
+    // MARK: - Recording (intent → actual reconciliation)
+
+    /// Public entry points (menu / tests) also route through intent.
+    func beginRecording() { recordingIntent = true; reconcile() }
+    func finishRecording() { recordingIntent = false; reconcile() }
+
+    /// Drive `isRecording` toward `recordingIntent`. Only one pass runs at a time;
+    /// it loops because the intent may flip during an `await`.
+    private func reconcile() {
+        guard !reconciling else { return }   // in-flight pass will observe the new intent
+        reconciling = true
+        Task { @MainActor in
+            defer { reconciling = false }
+            while recordingIntent != isRecording {
+                if recordingIntent {
+                    await beginRecordingTransition()
+                    if !isRecording { break }   // begin failed (e.g. mic error) — don't spin
+                } else {
+                    await finishRecordingTransition()
+                }
+            }
         }
     }
 
-    // MARK: - Recording
-
-    func beginRecording() async {
-        guard !isRecording, !busy else { return }
-        busy = true
-        defer { busy = false }
+    private func beginRecordingTransition() async {
         do {
             try await controller.beginRecording()
             isRecording = true
             statusText = "Listening…"
             overlay.show(state: .recording)
         } catch {
+            isRecording = false
             statusText = "Mic error: \(error.localizedDescription)"
             overlay.show(state: .error(statusText))
         }
     }
 
-    func finishRecording() async {
-        guard isRecording, !busy else { return }
-        busy = true
-        defer { busy = false }
+    private func finishRecordingTransition() async {
         isRecording = false
         statusText = "Transcribing…"
         overlay.show(state: .processing)
@@ -134,6 +155,7 @@ final class AppCoordinator: ObservableObject {
     }
 
     func cancel() {
+        recordingIntent = false
         Task { await controller.cancelRecording() }
         isRecording = false
         statusText = "Cancelled"
