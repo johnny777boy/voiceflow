@@ -53,9 +53,14 @@ func runHotkeyTests(_ s: TestSuite) {
         s.expectFalse(HotkeyMatcher.shouldEndChord(isChordDown: true, isPushToTalk: false, modifiersStillMatch: false))
     }
 
-    s.test("default hotkey configuration decodes to Option") { s in
+    s.test("default hotkey is a single fn-key hold") { s in
         let config = HotkeyConfiguration.defaultPushToTalk
-        s.expectEqual(HotkeyMatcher.decode(carbonMask: config.modifierFlags), [.option])
-        s.expectEqual(config.keyCode, spaceKey)
+        s.expectEqual(HotkeyMatcher.decode(carbonMask: config.modifierFlags), [.function])
+        s.expectNil(config.keyCode)   // pure-modifier trigger
+        s.expect(config.isPushToTalk)
+    }
+
+    s.test("decode maps the fn sentinel to .function") { s in
+        s.expectEqual(HotkeyMatcher.decode(carbonMask: HotkeyMatcher.carbonFunction), [.function])
     }
 }

@@ -10,6 +10,7 @@ struct HotkeyRecorderView: View {
 
     @State private var capturing = false
     @State private var monitor: Any?
+    @State private var flagsMonitor: Any?
 
     var body: some View {
         Button(action: toggle) {
@@ -32,8 +33,8 @@ struct HotkeyRecorderView: View {
 
     private func start() {
         capturing = true
+        // A normal key (optionally with modifiers) → keyed combo.
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
-            // Ignore lone modifier presses; wait for an actual key.
             guard let config = Self.configuration(from: event, isPushToTalk: current.isPushToTalk) else {
                 return nil
             }
@@ -41,12 +42,39 @@ struct HotkeyRecorderView: View {
             stop()
             return nil   // swallow the key so it doesn't type
         }
+        // A single modifier held alone (fn / ⌥ / ⌘ / ⌃ / ⇧) → single-key hold.
+        flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged]) { event in
+            guard let config = Self.pureModifier(from: event, isPushToTalk: current.isPushToTalk) else {
+                return event
+            }
+            onCommit(config)
+            stop()
+            return event
+        }
     }
 
     private func stop() {
         if let monitor { NSEvent.removeMonitor(monitor) }
+        if let flagsMonitor { NSEvent.removeMonitor(flagsMonitor) }
         monitor = nil
+        flagsMonitor = nil
         capturing = false
+    }
+
+    /// Build a pure-modifier (single-key hold) config when exactly one modifier
+    /// is currently held. Returns nil otherwise (e.g. on release, or a combo).
+    static func pureModifier(from event: NSEvent, isPushToTalk: Bool) -> HotkeyConfiguration? {
+        let f = event.modifierFlags
+        var mask: UInt32 = 0
+        var glyph = ""
+        var count = 0
+        if f.contains(.function) { mask |= HotkeyMatcher.carbonFunction; glyph = "🌐 fn"; count += 1 }
+        if f.contains(.command)  { mask |= HotkeyMatcher.carbonCommand;  glyph = "⌘"; count += 1 }
+        if f.contains(.option)   { mask |= HotkeyMatcher.carbonOption;   glyph = "⌥"; count += 1 }
+        if f.contains(.control)  { mask |= HotkeyMatcher.carbonControl;  glyph = "⌃"; count += 1 }
+        if f.contains(.shift)    { mask |= HotkeyMatcher.carbonShift;    glyph = "⇧"; count += 1 }
+        guard count == 1 else { return nil }
+        return HotkeyConfiguration(keyCode: nil, modifierFlags: mask, displayString: glyph, isPushToTalk: isPushToTalk)
     }
 
     // MARK: - Event → HotkeyConfiguration
