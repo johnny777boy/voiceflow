@@ -1,6 +1,8 @@
 import Foundation
 import AppKit
 import SwiftUI
+import AVFoundation
+import Speech
 import VoiceFlowCore
 
 /// Observable app state that bridges the SwiftUI UI with the `DictationController`
@@ -14,6 +16,8 @@ final class AppCoordinator: ObservableObject {
     @Published private(set) var lastResult: DictationResult?
     @Published private(set) var recentRecords: [TranscriptRecord] = []
     @Published private(set) var accessibilityGranted = false
+    @Published private(set) var microphoneGranted = false
+    @Published private(set) var speechGranted = false
 
     private let controller: DictationController
     private let hotkeys: GlobalHotkeyManager
@@ -68,17 +72,72 @@ final class AppCoordinator: ObservableObject {
     func start() {
         guard !didStart else { return }   // idempotent: safe if invoked more than once
         didStart = true
-        accessibilityGranted = AX.hasAccessibilityPermission(prompt: true)
+        refreshPermissionStatus()
+        _ = AX.hasAccessibilityPermission(prompt: true)   // nudge the AX prompt once
         Task { await requestPermissions() }
         registerHotkey()
         LoginItemManager.setEnabled(settings.launchAtLogin)
         refreshHistory()
+
+        // Re-check permissions whenever the app is refocused (e.g. after the user
+        // toggles a permission in System Settings), so banners aren't stale.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.refreshPermissionStatus() }
+        }
+    }
+
+    private func refreshPermissionStatus() {
+        accessibilityGranted = AX.hasAccessibilityPermission(prompt: false)
+        microphoneGranted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+        speechGranted = SFSpeechRecognizer.authorizationStatus() == .authorized
     }
 
     private func requestPermissions() async {
         _ = await AudioEngineRecorder().requestPermission()
         _ = await SpeechTranscriber().requestPermission()
-        await MainActor.run { accessibilityGranted = AX.hasAccessibilityPermission(prompt: false) }
+        await MainActor.run { refreshPermissionStatus() }
+    }
+
+    /// Ensure mic + speech are authorized right before recording. Returns an
+    /// actionable error message if not (nil means good to go).
+    private func ensureCapturePermissions() async -> String? {
+        // Microphone
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized: break
+        case .notDetermined:
+            let granted = await withCheckedContinuation { c in
+                AVCaptureDevice.requestAccess(for: .audio) { c.resume(returning: $0) }
+            }
+            if !granted {
+                return "Microphone access is off. Enable VoiceFlow in System Settings ▸ Privacy & Security ▸ Microphone."
+            }
+        default:
+            return "Microphone access is off. Enable VoiceFlow in System Settings ▸ Privacy & Security ▸ Microphone."
+        }
+        // Speech recognition
+        switch SFSpeechRecognizer.authorizationStatus() {
+        case .authorized: break
+        case .notDetermined:
+            let status = await withCheckedContinuation { (c: CheckedContinuation<SFSpeechRecognizerAuthorizationStatus, Never>) in
+                SFSpeechRecognizer.requestAuthorization { c.resume(returning: $0) }
+            }
+            if status != .authorized {
+                return "Speech Recognition is off. Enable VoiceFlow in System Settings ▸ Privacy & Security ▸ Speech Recognition."
+            }
+        default:
+            return "Speech Recognition is off. Enable VoiceFlow in System Settings ▸ Privacy & Security ▸ Speech Recognition."
+        }
+        refreshPermissionStatus()
+        return nil
+    }
+
+    /// Open a specific Privacy & Security settings pane.
+    func openPrivacySettings(_ pane: String) {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     private func registerHotkey() {
@@ -126,6 +185,14 @@ final class AppCoordinator: ObservableObject {
     }
 
     private func beginRecordingTransition() async {
+        // Gate on mic + speech permission first, with an actionable message.
+        if let message = await ensureCapturePermissions() {
+            recordingIntent = false
+            isRecording = false
+            statusText = message
+            overlay.show(state: .error(message))
+            return
+        }
         do {
             try await controller.beginRecording()
             isRecording = true

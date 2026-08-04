@@ -15,7 +15,9 @@ struct HomeView: View {
     var body: some View {
         VStack(spacing: 18) {
             header
-            if !coordinator.accessibilityGranted { permissionBanner }
+            if !coordinator.microphoneGranted || !coordinator.speechGranted || !coordinator.accessibilityGranted {
+                permissionBanner
+            }
             talkButton
             statusBlock
             modePicker
@@ -37,10 +39,9 @@ struct HomeView: View {
                 Text("Push-to-talk dictation").font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            Text(coordinator.settings.hotkey.displayString)
-                .font(.caption.monospaced().weight(.medium))
-                .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(.quaternary, in: Capsule())
+            HotkeyRecorderView(current: coordinator.settings.hotkey) { newHotkey in
+                var s = coordinator.settings; s.hotkey = newHotkey; coordinator.applySettings(s)
+            }
             Button { openSettings() } label: {
                 Image(systemName: "gearshape.fill").font(.body)
             }
@@ -54,20 +55,33 @@ struct HomeView: View {
             .overlay(Image(systemName: "waveform").font(.system(size: 17, weight: .bold)).foregroundStyle(.white))
     }
 
-    private var permissionBanner: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "exclamationmark.shield.fill").foregroundStyle(.orange)
-            Text("Grant **Accessibility** in System Settings to enable the hotkey and text insertion.")
-                .font(.caption)
-            Spacer(minLength: 0)
-            Button("Open") {
-                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-                    NSWorkspace.shared.open(url)
-                }
-            }.font(.caption)
+    // Show a row per permission that still needs granting.
+    @ViewBuilder private var permissionBanner: some View {
+        VStack(spacing: 6) {
+            if !coordinator.microphoneGranted {
+                permissionRow("Microphone", "mic.fill", "Needed to record your voice.", "Privacy_Microphone")
+            }
+            if !coordinator.speechGranted {
+                permissionRow("Speech Recognition", "waveform", "Needed to turn speech into text.", "Privacy_SpeechRecognition")
+            }
+            if !coordinator.accessibilityGranted {
+                permissionRow("Accessibility", "hand.point.up.left.fill", "Needed for the global hotkey and inserting into other apps.", "Privacy_Accessibility")
+            }
         }
         .padding(10)
         .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func permissionRow(_ title: String, _ icon: String, _ why: String, _ pane: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon).foregroundStyle(.orange).frame(width: 18)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Enable \(title)").font(.caption.weight(.semibold))
+                Text(why).font(.caption2).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+            Button("Open") { coordinator.openPrivacySettings(pane) }.font(.caption)
+        }
     }
 
     // MARK: - Talk button (hold to talk)

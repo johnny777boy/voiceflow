@@ -41,7 +41,15 @@ final class SpeechTranscriber: Transcribing, @unchecked Sendable {
     }
 
     func transcribe(_ audio: AudioCapture, languageCode: String) async throws -> TranscriptionResult {
-        guard !audio.samples.isEmpty else { throw VoiceFlowError.emptyTranscript }
+        // Disambiguate the failure modes so the UI can tell the user what's wrong.
+        guard !audio.samples.isEmpty else {
+            throw VoiceFlowError.audioEngineFailure("No audio was captured — check VoiceFlow's Microphone access and your input device.")
+        }
+        let peak = audio.samples.reduce(Float(0)) { Swift.max($0, Swift.abs($1)) }
+        if peak < 0.004 {
+            throw VoiceFlowError.audioEngineFailure("The microphone captured only silence — check the input device and Microphone permission.")
+        }
+        Log.transcription.notice("transcribe: \(audio.samples.count, privacy: .public) samples, peak \(peak, privacy: .public)")
 
         let locale = Locale(identifier: languageCode)
         guard let recognizer = SFSpeechRecognizer(locale: locale) ?? SFSpeechRecognizer(),
