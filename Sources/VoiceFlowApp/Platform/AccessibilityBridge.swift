@@ -37,6 +37,22 @@ enum AX {
         return element(system, kAXFocusedUIElementAttribute)
     }
 
+    /// Text-entry roles that can receive dictated text.
+    private static let editableRoles: Set<String> = [
+        "AXTextField", "AXTextArea", "AXComboBox", "AXSearchField",
+    ]
+
+    /// Whether an element is an editable text destination: either it exposes a
+    /// settable value/selection, or it reports a known text-entry role. This is
+    /// how we tell "the caret is in a text box" from "the user is just looking at
+    /// a window" — so we don't claim an insertion that has nowhere to land.
+    static func isEditable(_ element: AXUIElement) -> Bool {
+        if isSettable(element, kAXSelectedTextAttribute) { return true }
+        if isSettable(element, kAXValueAttribute) { return true }
+        if let role = string(element, kAXRoleAttribute), editableRoles.contains(role) { return true }
+        return false
+    }
+
     /// Whether the app currently has Accessibility (AX) permission.
     static func hasAccessibilityPermission(prompt: Bool = false) -> Bool {
         // Literal key value of kAXTrustedCheckOptionPrompt (avoids referencing the

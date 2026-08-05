@@ -36,7 +36,7 @@ struct OverlayView: View {
         case .processing:
             ProgressView().controlSize(.small).tint(.white)
         case .done(let r):
-            Image(systemName: r.outcome.didInsert ? "checkmark.circle.fill" : "doc.on.clipboard.fill")
+            Image(systemName: r.outcome.didInsert ? "checkmark.circle.fill" : "text.cursor")
                 .foregroundStyle(r.outcome.didInsert ? Color.green : Color.orange)
         case .error:
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
@@ -56,7 +56,7 @@ struct OverlayView: View {
         switch model.state {
         case .recording:  return nil            // the waveform speaks for itself
         case .processing: return "Transcribing…"
-        case .done(let r): return r.outcome.didInsert ? "Inserted" : "Copied"
+        case .done(let r): return r.outcome.didInsert ? "Inserted" : "No text box — click one first"
         case .error:      return "Try again"
         }
     }

@@ -62,7 +62,7 @@ public enum DestinationGuard {
             case .accessibility, .clipboardPaste: return nil
             case .copyOnly: return forceCopyOnly
                 ? "This app is configured for copy-only; text copied to clipboard."
-                : "No insertion path available; text copied to clipboard."
+                : "No text field focused — copied. Click a text field, then dictate."
             }
         }()
         return InsertionPlan(strategy: strategy, destinationVerified: true, willInsert: willInsert, note: note)

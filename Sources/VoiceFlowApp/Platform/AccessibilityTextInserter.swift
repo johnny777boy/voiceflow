@@ -10,16 +10,25 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
 
     func currentCapabilities() -> DestinationCapabilities {
         guard let focused = AX.focusedElement() else {
-            // No focused element / no AX permission: fall back to clipboard paste.
+            // Nothing is focused — there is no caret to insert at. Report no
+            // insertion path so we copy and guide instead of pretending to insert.
             return DestinationCapabilities(supportsAccessibilityInsertion: false,
-                                           allowsSyntheticPaste: true, isSecureInput: false)
+                                           allowsSyntheticPaste: false, isSecureInput: false)
         }
         let isSecure = Self.isSecure(focused)
+        if isSecure {
+            return DestinationCapabilities(supportsAccessibilityInsertion: false,
+                                           allowsSyntheticPaste: false, isSecureInput: true)
+        }
+        // Only claim an insertion path when the focused element is an editable
+        // text destination. Otherwise (a button, a scroll area, a plain window)
+        // there's nowhere for the text to go.
+        let editable = AX.isEditable(focused)
         let settable = AX.isSettable(focused, kAXSelectedTextAttribute) || AX.isSettable(focused, kAXValueAttribute)
         return DestinationCapabilities(
-            supportsAccessibilityInsertion: settable && !isSecure,
-            allowsSyntheticPaste: !isSecure,
-            isSecureInput: isSecure
+            supportsAccessibilityInsertion: settable,
+            allowsSyntheticPaste: editable,
+            isSecureInput: false
         )
     }
 
@@ -56,6 +65,13 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
             return try insert(text, using: .clipboardPaste)
 
         case .clipboardPaste:
+            // Prefer TYPING the text straight at the caret: it lands exactly where
+            // the cursor is, doesn't disturb the clipboard, and works in Electron /
+            // web fields where a synthetic ⌘V or AX-set can silently fail.
+            if typeAtCursor(text) {
+                return InsertionOutcome(strategy: .clipboardPaste, didInsert: true)
+            }
+            // Fall back to a real clipboard paste.
             do {
                 try pasteWithRestore(text)
             } catch VoiceFlowError.secureFieldBlocked {
@@ -133,6 +149,38 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
             pb.clearContents()
             if let previous { pb.setString(previous, forType: .string) }
         }
+    }
+
+    /// Type `text` as literal Unicode keystrokes at the current caret. Uses
+    /// `keyboardSetUnicodeString`, so it inserts the exact characters regardless of
+    /// keyboard layout. Newlines are converted to spaces so a synthesized Return can
+    /// never submit a chat box / run a command (the app must never auto-send).
+    private func typeAtCursor(_ text: String) -> Bool {
+        if focusedFieldIsSecure() { return false }
+        let sanitized = text.replacingOccurrences(of: "\n", with: " ")
+                            .replacingOccurrences(of: "\r", with: " ")
+        let units = Array(sanitized.utf16)
+        guard !units.isEmpty, let source = CGEventSource(stateID: .combinedSessionState) else { return false }
+
+        // Post in small chunks; some apps drop very long unicode strings per event.
+        let chunk = 16
+        var i = 0
+        while i < units.count {
+            let slice = Array(units[i..<min(i + chunk, units.count)])
+            guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
+                  let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else {
+                return false
+            }
+            slice.withUnsafeBufferPointer { buf in
+                down.keyboardSetUnicodeString(stringLength: buf.count, unicodeString: buf.baseAddress)
+                up.keyboardSetUnicodeString(stringLength: buf.count, unicodeString: buf.baseAddress)
+            }
+            down.post(tap: .cghidEventTap)
+            up.post(tap: .cghidEventTap)
+            Thread.sleep(forTimeInterval: 0.004)
+            i += chunk
+        }
+        return true
     }
 
     /// Synthesize a full Command+V sequence into the frontmost app. Posting the
