@@ -60,14 +60,20 @@ final class AppCoordinator: ObservableObject {
         // AI cleanup provider: prefer Apple's on-device model (free, private, no API
         // key) on macOS 26; otherwise the optional Anthropic provider (needs a key).
         let llmProvider: CleanupProviding
+        let useLLM: Bool
         if #available(macOS 26.0, *), FoundationModelsCleanupProvider.isAvailable {
+            // On-device, free, private — this is the "think, then deliver" polish
+            // step (like Wispr). Always run it; it isn't gated by the paid-API toggle.
             llmProvider = FoundationModelsCleanupProvider()
-            Log.cleanup.notice("cleanup: on-device Foundation Models")
+            useLLM = true
+            Log.cleanup.notice("cleanup: on-device Foundation Models (always on)")
         } else {
+            // Paid Anthropic API — respect the user's toggle + key.
             llmProvider = LLMCleanupProvider(secureStore: secureStore)
+            useLLM = loaded.useLLMCleanup
             Log.cleanup.notice("cleanup: Anthropic (API key) / rule-based")
         }
-        let pipeline = CleanupPipeline(llmProvider: llmProvider, useLLM: loaded.useLLMCleanup)
+        let pipeline = CleanupPipeline(llmProvider: llmProvider, useLLM: useLLM)
         // Pick the best engine: on macOS 26 use Apple's SpeechAnalyzer (records the
         // whole clip, then transcribes with full context — far more accurate).
         // Otherwise fall back to the legacy streaming engine.
