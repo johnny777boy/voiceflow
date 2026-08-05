@@ -1,50 +1,95 @@
 import SwiftUI
 import VoiceFlowCore
 
-/// The content of the floating overlay for each state.
+/// The floating pill's content. A live waveform while recording; a compact
+/// status while transcribing / after inserting.
 struct OverlayView: View {
-    let state: OverlayController.State
+    @ObservedObject var model: OverlayModel
 
     var body: some View {
-        HStack(spacing: 12) {
-            icon
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 13, weight: .semibold))
-                if let subtitle { Text(subtitle).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1) }
+        HStack(spacing: 10) {
+            leading
+            label
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 44)
+        .background(
+            Capsule().fill(Color.black.opacity(0.82))
+        )
+        .overlay(Capsule().strokeBorder(.white.opacity(0.10)))
+        .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
+        .frame(width: 260, height: 52)
+        .animation(.easeInOut(duration: 0.2), value: label2)
+    }
+
+    // A tiny value used only to trigger the label crossfade.
+    private var label2: String { titleText ?? "wave" }
+
+    @ViewBuilder private var leading: some View {
+        switch model.state {
+        case .recording:
+            HStack(spacing: 8) {
+                Circle().fill(Color.red).frame(width: 8, height: 8)
+                WaveformBars(level: model.level)
+                    .frame(width: 96, height: 22)
             }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 14)
-        .frame(width: 320, height: 64)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.white.opacity(0.08)))
-    }
-
-    @ViewBuilder private var icon: some View {
-        switch state {
-        case .recording: Image(systemName: "mic.fill").foregroundStyle(.red)
-        case .processing: ProgressView().controlSize(.small)
-        case .done(let r): Image(systemName: r.outcome.didInsert ? "checkmark.circle.fill" : "doc.on.clipboard")
-                .foregroundStyle(r.outcome.didInsert ? .green : .orange)
-        case .error: Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
+        case .processing:
+            ProgressView().controlSize(.small).tint(.white)
+        case .done(let r):
+            Image(systemName: r.outcome.didInsert ? "checkmark.circle.fill" : "doc.on.clipboard.fill")
+                .foregroundStyle(r.outcome.didInsert ? Color.green : Color.orange)
+        case .error:
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
         }
     }
 
-    private var title: String {
-        switch state {
-        case .recording: return "Listening…"
+    @ViewBuilder private var label: some View {
+        if let titleText {
+            Text(titleText)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+        }
+    }
+
+    private var titleText: String? {
+        switch model.state {
+        case .recording:  return nil            // the waveform speaks for itself
         case .processing: return "Transcribing…"
-        case .done(let r): return r.outcome.didInsert ? "Inserted" : "Copied to clipboard"
-        case .error: return "Something went wrong"
+        case .done(let r): return r.outcome.didInsert ? "Inserted" : "Copied"
+        case .error:      return "Try again"
+        }
+    }
+}
+
+/// A row of bars that pulse with the mic level — the "vibration" you see while
+/// speaking. Driven by a timeline so it animates continuously; amplitude follows
+/// the live level.
+private struct WaveformBars: View {
+    var level: CGFloat
+    private let count = 13
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+            let t = timeline.date.timeIntervalSinceReferenceDate
+            HStack(alignment: .center, spacing: 3) {
+                ForEach(0..<count, id: \.self) { i in
+                    Capsule()
+                        .fill(Color.white.opacity(0.92))
+                        .frame(width: 3, height: height(i, t))
+                }
+            }
         }
     }
 
-    private var subtitle: String? {
-        switch state {
-        case .recording: return "Release the hotkey to finish"
-        case .processing: return nil
-        case .done(let r): return r.record.cleanText
-        case .error(let message): return message
-        }
+    private func height(_ i: Int, _ t: Double) -> CGFloat {
+        let base: CGFloat = 3
+        let amp = 19 * max(0.06, level)                 // idle shimmer + speech amplitude
+        // Center bars taller than the edges, each with its own phase.
+        let center = CGFloat(count - 1) / 2
+        let falloff = 1 - abs(CGFloat(i) - center) / (center + 1) * 0.55
+        let phase = t * 9 + Double(i) * 0.6
+        let wave = (sin(phase) * 0.5 + 0.5)
+        return base + amp * falloff * CGFloat(wave)
     }
 }

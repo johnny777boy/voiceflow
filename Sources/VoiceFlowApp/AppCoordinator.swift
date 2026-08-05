@@ -80,6 +80,10 @@ final class AppCoordinator: ObservableObject {
     func start() {
         guard !didStart else { return }   // idempotent: safe if invoked more than once
         didStart = true
+        // Feed the live mic level into the floating waveform pill.
+        live.levelHandler = { [weak self] level in
+            Task { @MainActor in self?.overlay.updateLevel(level) }
+        }
         refreshPermissionStatus()
         _ = AX.hasAccessibilityPermission(prompt: true)   // nudge the AX prompt once
         InputMonitoring.request()                         // nudge the Input Monitoring prompt

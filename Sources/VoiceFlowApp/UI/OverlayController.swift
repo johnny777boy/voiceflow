@@ -3,8 +3,17 @@ import AppKit
 import SwiftUI
 import VoiceFlowCore
 
-/// A small floating overlay shown near the bottom of the screen while recording
-/// and processing. Backed by a borderless, non-activating NSPanel.
+/// Live model backing the floating pill. Updating `level` animates the waveform
+/// without rebuilding the hosting view.
+@MainActor
+final class OverlayModel: ObservableObject {
+    @Published var state: OverlayController.State = .recording
+    @Published var level: CGFloat = 0
+}
+
+/// A small floating pill near the bottom of the screen — a Wispr-style live
+/// waveform while recording, then a brief status. Borderless, non-activating
+/// NSPanel so it never steals focus from the app you're dictating into.
 @MainActor
 final class OverlayController {
     enum State: Equatable {
@@ -14,20 +23,17 @@ final class OverlayController {
         case error(String)
     }
 
+    let model = OverlayModel()
     private var panel: NSPanel?
     private var hideWorkItem: DispatchWorkItem?
 
     func show(state: State) {
-        let view = OverlayView(state: state)
-        let hosting = NSHostingView(rootView: view)
-        hosting.frame = NSRect(x: 0, y: 0, width: 320, height: 64)
-
-        let panel = existingPanel()
-        panel.contentView = hosting
+        model.state = state
+        if state == .recording { model.level = 0 }
+        let panel = ensurePanel()
         positionBottomCenter(panel)
         panel.orderFrontRegardless()
 
-        // Auto-hide terminal states.
         hideWorkItem?.cancel()
         switch state {
         case .recording, .processing:
@@ -35,18 +41,24 @@ final class OverlayController {
         case .done, .error:
             let work = DispatchWorkItem { [weak self] in self?.hide() }
             hideWorkItem = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: work)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.6, execute: work)
         }
     }
 
+    /// Push a fresh mic level (0…1) into the live waveform.
+    func updateLevel(_ level: Float) {
+        model.level = CGFloat(max(0, min(1, level)))
+    }
+
     func hide() {
+        model.level = 0
         panel?.orderOut(nil)
     }
 
-    private func existingPanel() -> NSPanel {
+    private func ensurePanel() -> NSPanel {
         if let panel { return panel }
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 320, height: 64),
+            contentRect: NSRect(x: 0, y: 0, width: 260, height: 52),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered, defer: false
         )
@@ -56,6 +68,10 @@ final class OverlayController {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+        panel.ignoresMouseEvents = true
+        let hosting = NSHostingView(rootView: OverlayView(model: model))
+        hosting.frame = NSRect(x: 0, y: 0, width: 260, height: 52)
+        panel.contentView = hosting
         self.panel = panel
         return panel
     }
@@ -65,7 +81,7 @@ final class OverlayController {
         let visible = screen.visibleFrame
         let size = panel.frame.size
         let x = visible.midX - size.width / 2
-        let y = visible.minY + 80
+        let y = visible.minY + 90
         panel.setFrameOrigin(NSPoint(x: x, y: y))
     }
 }
