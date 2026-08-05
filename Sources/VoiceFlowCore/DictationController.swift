@@ -113,6 +113,9 @@ public actor DictationController {
         // Deliver text.
         let outcome: InsertionOutcome
         if plan.willInsert {
+            // Focus the intended destination app before pasting, in case focus
+            // drifted (e.g. to VoiceFlow) during transcription.
+            inserter.prepareForInsertion(intoBundleIdentifier: current.bundleIdentifier)
             do {
                 outcome = try inserter.insert(clean, using: plan.strategy)
             } catch {

@@ -23,6 +23,19 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
         )
     }
 
+    func prepareForInsertion(intoBundleIdentifier bundleIdentifier: String?) {
+        guard let bundleIdentifier, bundleIdentifier != VoiceFlowInfo.bundleIdentifier else { return }
+        let activate: @Sendable () -> Void = {
+            let ws = NSWorkspace.shared
+            // Only activate if the target isn't already frontmost (avoids stealing
+            // focus unnecessarily). Fixes the case where focus drifted to VoiceFlow.
+            guard ws.frontmostApplication?.bundleIdentifier != bundleIdentifier else { return }
+            ws.runningApplications.first { $0.bundleIdentifier == bundleIdentifier }?.activate()
+        }
+        if Thread.isMainThread { activate() } else { DispatchQueue.main.sync(execute: activate) }
+        Thread.sleep(forTimeInterval: 0.08)   // let the target come to front
+    }
+
     func insert(_ text: String, using strategy: InsertionStrategy) throws -> InsertionOutcome {
         // Last-moment secure-field guard (closes the TOCTOU between planning and
         // insertion): if the focused field is secure *now* — e.g. focus moved to a
@@ -137,9 +150,10 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
         vDown.flags = .maskCommand
         vUp.flags = .maskCommand
         let tap: CGEventTapLocation = .cghidEventTap
-        cmdDown.post(tap: tap)
-        vDown.post(tap: tap)
-        vUp.post(tap: tap)
+        // Small gaps between events so slower apps register the keystroke.
+        cmdDown.post(tap: tap); Thread.sleep(forTimeInterval: 0.01)
+        vDown.post(tap: tap);   Thread.sleep(forTimeInterval: 0.01)
+        vUp.post(tap: tap);     Thread.sleep(forTimeInterval: 0.01)
         cmdUp.post(tap: tap)
         return true
     }

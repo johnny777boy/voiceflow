@@ -18,6 +18,10 @@ public struct InsertionOutcome: Sendable, Equatable {
 
 /// Abstraction over delivering text to the destination and clipboard control.
 public protocol TextInserting: AnyObject, Sendable {
+    /// Bring the destination app to the front just before insertion, so a paste
+    /// lands in the right place even if focus drifted during transcription.
+    /// Default is a no-op (used by tests).
+    func prepareForInsertion(intoBundleIdentifier bundleIdentifier: String?)
     /// Attempt to insert `text` using `strategy`. Implementations must restore the
     /// prior clipboard contents when using `.clipboardPaste`.
     func insert(_ text: String, using strategy: InsertionStrategy) throws -> InsertionOutcome
@@ -25,4 +29,8 @@ public protocol TextInserting: AnyObject, Sendable {
     func copyToClipboard(_ text: String)
     /// Inspect the current destination's capabilities (Accessibility support, secure input).
     func currentCapabilities() -> DestinationCapabilities
+}
+
+public extension TextInserting {
+    func prepareForInsertion(intoBundleIdentifier bundleIdentifier: String?) {}
 }
