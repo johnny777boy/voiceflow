@@ -57,10 +57,17 @@ final class AppCoordinator: ObservableObject {
         self.secureStore = KeychainStore()
         self.hotkeys = GlobalHotkeyManager()
 
-        let pipeline = CleanupPipeline(
-            llmProvider: LLMCleanupProvider(secureStore: secureStore),
-            useLLM: loaded.useLLMCleanup
-        )
+        // AI cleanup provider: prefer Apple's on-device model (free, private, no API
+        // key) on macOS 26; otherwise the optional Anthropic provider (needs a key).
+        let llmProvider: CleanupProviding
+        if #available(macOS 26.0, *), FoundationModelsCleanupProvider.isAvailable {
+            llmProvider = FoundationModelsCleanupProvider()
+            Log.cleanup.notice("cleanup: on-device Foundation Models")
+        } else {
+            llmProvider = LLMCleanupProvider(secureStore: secureStore)
+            Log.cleanup.notice("cleanup: Anthropic (API key) / rule-based")
+        }
+        let pipeline = CleanupPipeline(llmProvider: llmProvider, useLLM: loaded.useLLMCleanup)
         // Pick the best engine: on macOS 26 use Apple's SpeechAnalyzer (records the
         // whole clip, then transcribes with full context — far more accurate).
         // Otherwise fall back to the legacy streaming engine.
