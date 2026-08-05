@@ -83,7 +83,15 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
     }
 
     /// Whether the *currently* focused element is a secure (password) field.
+    ///
+    /// Two independent signals, so we never paste into a password field even when
+    /// Accessibility can't read it:
+    ///  1. OS-level secure keyboard entry — password fields enable this system-wide,
+    ///     and it's readable without AX. This closes the hole where `AX.focusedElement()`
+    ///     is nil (no AX, or the field doesn't expose AX) but the field IS secure.
+    ///  2. The focused AX element's role/subrole, when available.
     private func focusedFieldIsSecure() -> Bool {
+        if IsSecureEventInputEnabled() { return true }
         guard let focused = AX.focusedElement() else { return false }
         return Self.isSecure(focused)
     }

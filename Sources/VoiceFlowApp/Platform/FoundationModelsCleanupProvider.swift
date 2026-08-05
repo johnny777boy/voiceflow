@@ -32,15 +32,34 @@ final class FoundationModelsCleanupProvider: CleanupProviding, @unchecked Sendab
         let text = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { throw VoiceFlowError.cleanupProviderUnavailable }
 
-        // Safety net: cleanup should only lightly reshape the text. If the model
-        // ballooned it (hallucination) or gutted it (dropped content), reject the
-        // rewrite so the pipeline falls back to the deterministic result — we never
-        // ship text that "doesn't make sense".
+        // Safety net: cleanup must edit, not rewrite. Reject and fall back to the
+        // deterministic result if the model changed the content — so we never ship
+        // text that changed the user's meaning.
+        //
+        // (a) Length: reject a ballooned (hallucinated) or gutted output.
         let inWords = rawText.split(whereSeparator: { $0 == " " || $0 == "\n" }).count
         let outWords = text.split(whereSeparator: { $0 == " " || $0 == "\n" }).count
         if inWords >= 3, (outWords > inWords * 2 || outWords * 3 < inWords) {
             throw VoiceFlowError.cleanupProviderUnavailable
         }
+        // (b) Content preservation: most of the significant words (>3 chars, so we
+        // ignore filler/articles that cleanup is allowed to drop) must survive. A
+        // paraphrase that swaps content words fails this even at the same length.
+        let significant = Self.significantWords(rawText)
+        if significant.count >= 4 {
+            let kept = Set(Self.significantWords(text))
+            let survived = significant.filter { kept.contains($0) }.count
+            if Double(survived) / Double(significant.count) < 0.6 {
+                throw VoiceFlowError.cleanupProviderUnavailable
+            }
+        }
         return text
+    }
+
+    private static func significantWords(_ text: String) -> [String] {
+        text.lowercased()
+            .split { !($0.isLetter || $0.isNumber) }
+            .map(String.init)
+            .filter { $0.count > 3 }
     }
 }
