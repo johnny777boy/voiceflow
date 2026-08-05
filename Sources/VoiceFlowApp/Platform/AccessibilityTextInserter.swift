@@ -9,25 +9,22 @@ import VoiceFlowCore
 final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
 
     func currentCapabilities() -> DestinationCapabilities {
+        // Attempt insertion for any non-secure destination. AX role detection is
+        // unreliable across apps (Notes, Electron, browsers), so we don't gate on
+        // it — typing at the caret / synthetic paste posts to wherever the cursor
+        // is. Only a secure (password) field is ever refused.
         guard let focused = AX.focusedElement() else {
-            // Nothing is focused — there is no caret to insert at. Report no
-            // insertion path so we copy and guide instead of pretending to insert.
             return DestinationCapabilities(supportsAccessibilityInsertion: false,
-                                           allowsSyntheticPaste: false, isSecureInput: false)
+                                           allowsSyntheticPaste: true, isSecureInput: false)
         }
-        let isSecure = Self.isSecure(focused)
-        if isSecure {
+        if Self.isSecure(focused) {
             return DestinationCapabilities(supportsAccessibilityInsertion: false,
                                            allowsSyntheticPaste: false, isSecureInput: true)
         }
-        // Only claim an insertion path when the focused element is an editable
-        // text destination. Otherwise (a button, a scroll area, a plain window)
-        // there's nowhere for the text to go.
-        let editable = AX.isEditable(focused)
         let settable = AX.isSettable(focused, kAXSelectedTextAttribute) || AX.isSettable(focused, kAXValueAttribute)
         return DestinationCapabilities(
             supportsAccessibilityInsertion: settable,
-            allowsSyntheticPaste: editable,
+            allowsSyntheticPaste: true,
             isSecureInput: false
         )
     }
@@ -65,13 +62,10 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
             return try insert(text, using: .clipboardPaste)
 
         case .clipboardPaste:
-            // Prefer TYPING the text straight at the caret: it lands exactly where
-            // the cursor is, doesn't disturb the clipboard, and works in Electron /
-            // web fields where a synthetic ⌘V or AX-set can silently fail.
-            if typeAtCursor(text) {
-                return InsertionOutcome(strategy: .clipboardPaste, didInsert: true)
-            }
-            // Fall back to a real clipboard paste.
+            // Wispr Flow's proven method: put the text on the clipboard, send ⌘V to
+            // the focused field, then restore the previous clipboard. Works across
+            // native, Electron and web fields. Typing is only a fallback for the
+            // rare app that ignores synthetic ⌘V.
             do {
                 try pasteWithRestore(text)
             } catch VoiceFlowError.secureFieldBlocked {

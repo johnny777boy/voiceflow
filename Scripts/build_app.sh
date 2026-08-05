@@ -39,9 +39,12 @@ SIGN_KEYCHAIN="voiceflow-signing.keychain"
 SIGN_KEYCHAIN_PW="voiceflow"
 ENTITLEMENTS="$ROOT/bundle/VoiceFlow.entitlements"
 
+# Unlock the signing keychain FIRST — it can auto-lock, and a locked keychain
+# makes find-identity return nothing, silently dropping us to ad-hoc signing
+# (which resets every macOS permission on each rebuild).
+security unlock-keychain -p "$SIGN_KEYCHAIN_PW" "$SIGN_KEYCHAIN" 2>/dev/null || true
 if security find-identity -p codesigning "$SIGN_KEYCHAIN" 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
   echo "==> Codesigning with stable identity '$SIGN_IDENTITY' (permissions persist)…"
-  security unlock-keychain -p "$SIGN_KEYCHAIN_PW" "$SIGN_KEYCHAIN" 2>/dev/null || true
   codesign --force --deep \
     --sign "$SIGN_IDENTITY" --keychain "$SIGN_KEYCHAIN" \
     --entitlements "$ENTITLEMENTS" --options runtime "$APP"
