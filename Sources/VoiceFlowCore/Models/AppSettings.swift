@@ -42,7 +42,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
         historyRetentionLimit: Int = 500,
         overlayEnabled: Bool = true,
         launchAtLogin: Bool = false,
-        useLLMCleanup: Bool = false,
+        useLLMCleanup: Bool = true,
         privacyRedactionEnabled: Bool = false
     ) {
         self.microphoneDeviceID = microphoneDeviceID

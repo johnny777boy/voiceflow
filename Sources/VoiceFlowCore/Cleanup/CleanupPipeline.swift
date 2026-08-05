@@ -32,6 +32,9 @@ public struct CleanupPipeline: CleanupProviding {
             let trimmed = refined.trimmingCharacters(in: .whitespacesAndNewlines)
             // Guard against an LLM that returns nothing useful.
             return trimmed.isEmpty ? base : refined
+        } catch VoiceFlowError.cleanupProviderUnavailable {
+            // No API key configured — expected; use the rule-based result silently.
+            return base
         } catch {
             Log.cleanup.error("LLM cleanup failed, using rule-based result: \(String(describing: error), privacy: .public)")
             return base
