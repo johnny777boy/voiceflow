@@ -112,14 +112,22 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
         let locale = Locale(identifier: preferredLanguage)
         try await Self.ensureModelInstalled(locale: locale)
 
-        let transcriber = SpeechTranscriber(locale: locale, preset: .transcription)
+        // No volatile/interim results — we only want stable, FINAL segments for a
+        // recorded file. Mixing in volatile guesses is what made output garbled and
+        // inconsistent ("sometimes works, sometimes doesn't").
+        let transcriber = SpeechTranscriber(
+            locale: locale,
+            transcriptionOptions: [],
+            reportingOptions: [],
+            attributeOptions: []
+        )
         let analyzer = SpeechAnalyzer(modules: [transcriber])
 
-        // Consume results concurrently. Each result is a segment; trim and join with
-        // single spaces so sentences don't run together and there are no doubled spaces.
+        // Start consuming results BEFORE feeding audio so no early segment is lost.
+        // Accumulate only final segments, in time order, joined with single spaces.
         let resultsTask = Task { () throws -> String in
             var pieces: [String] = []
-            for try await result in transcriber.results {
+            for try await result in transcriber.results where result.isFinal {
                 let piece = String(result.text.characters).trimmingCharacters(in: .whitespacesAndNewlines)
                 if !piece.isEmpty { pieces.append(piece) }
             }
@@ -127,7 +135,9 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
         }
 
         let audioFile = try AVAudioFile(forReading: url)
-        _ = try await analyzer.analyzeSequence(from: audioFile)
+        if let lastTime = try await analyzer.analyzeSequence(from: audioFile) {
+            try await analyzer.finalize(through: lastTime)
+        }
         try await analyzer.finalizeAndFinishThroughEndOfInput()
 
         let text = try await resultsTask.value
