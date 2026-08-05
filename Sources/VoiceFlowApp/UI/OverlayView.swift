@@ -12,26 +12,27 @@ struct OverlayView: View {
         startPoint: .leading, endPoint: .trailing)
 
     var body: some View {
-        HStack(spacing: 11) {
+        HStack(spacing: 8) {
             leading
             if let titleText {
                 Text(titleText)
-                    .font(.system(size: 12.5, weight: .semibold, design: .rounded))
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.92))
                     .lineLimit(1)
                     .transition(.opacity)
             }
         }
-        .padding(.horizontal, 18)
-        .frame(height: 46)
+        .padding(.horizontal, 12)
+        .frame(height: 30)
         .background(pillBackground)
         .overlay(
             Capsule().strokeBorder(
                 LinearGradient(colors: [.white.opacity(0.22), .white.opacity(0.05)],
                                startPoint: .top, endPoint: .bottom), lineWidth: 0.75)
         )
-        .shadow(color: .black.opacity(0.4), radius: 16, y: 6)
-        .frame(width: 280, height: 56)
+        .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
+        .fixedSize()
+        .frame(width: 168, height: 44)
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: titleText)
     }
 
@@ -52,7 +53,7 @@ struct OverlayView: View {
         switch model.state {
         case .recording:
             WaveformBars(level: model.level, gradient: Self.accent)
-                .frame(width: 130, height: 26)
+                .frame(width: 82, height: 16)
         case .processing:
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small).tint(.white)
@@ -84,16 +85,16 @@ struct OverlayView: View {
 private struct WaveformBars: View {
     var level: CGFloat
     var gradient: LinearGradient
-    private let count = 21
+    private let count = 15
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
-            HStack(alignment: .center, spacing: 2.5) {
+            HStack(alignment: .center, spacing: 2) {
                 ForEach(0..<count, id: \.self) { i in
                     Capsule(style: .continuous)
                         .fill(gradient)
-                        .frame(width: 2.5, height: height(i, t))
+                        .frame(width: 2, height: height(i, t))
                 }
             }
             .animation(.easeOut(duration: 0.08), value: level)
@@ -101,8 +102,8 @@ private struct WaveformBars: View {
     }
 
     private func height(_ i: Int, _ t: Double) -> CGFloat {
-        let minH: CGFloat = 2.5
-        let maxH: CGFloat = 26
+        let minH: CGFloat = 2
+        let maxH: CGFloat = 16
         // Smooth level with a floor so it always breathes a little.
         let energy = 0.12 + 0.88 * min(1, max(0, level))
         // Bell-shaped envelope: centre bars taller than the edges.

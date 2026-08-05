@@ -58,7 +58,7 @@ final class OverlayController {
     private func ensurePanel() -> NSPanel {
         if let panel { return panel }
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 260, height: 52),
+            contentRect: NSRect(x: 0, y: 0, width: 168, height: 44),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered, defer: false
         )
@@ -70,7 +70,7 @@ final class OverlayController {
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
         panel.ignoresMouseEvents = true
         let hosting = NSHostingView(rootView: OverlayView(model: model))
-        hosting.frame = NSRect(x: 0, y: 0, width: 260, height: 52)
+        hosting.frame = NSRect(x: 0, y: 0, width: 168, height: 44)
         panel.contentView = hosting
         self.panel = panel
         return panel
