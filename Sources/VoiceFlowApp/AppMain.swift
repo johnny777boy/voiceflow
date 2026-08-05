@@ -9,6 +9,10 @@ struct VoiceFlowApp: App {
         // Main window: a visible, Dock-present surface.
         Window("VoiceFlow", id: "main") {
             HomeView(coordinator: coordinator)
+                // Start the app engine from the REAL coordinator instance the
+                // views use (App.init's @StateObject can be a throwaway). `start()`
+                // is idempotent, so re-appearing the window is harmless.
+                .task { coordinator.start() }
         }
         .defaultSize(width: 440, height: 660)
         .windowResizability(.contentMinSize)
@@ -24,11 +28,5 @@ struct VoiceFlowApp: App {
         Settings {
             SettingsView(coordinator: coordinator)
         }
-    }
-
-    init() {
-        // `start()` must run on the main actor after the coordinator exists.
-        let coordinator = _coordinator.wrappedValue
-        Task { @MainActor in coordinator.start() }
     }
 }
