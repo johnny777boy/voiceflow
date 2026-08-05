@@ -11,9 +11,10 @@ public enum TextNormalizer {
     /// "sort of", and "kind of" are intentionally NOT here — they are frequently
     /// meaningful ("I like it", "kind of blue"), and removing them would silently
     /// change the speaker's meaning.
+    /// NOTE: "you know" and "i mean" are deliberately NOT here — deleting them
+    /// unconditionally changes meaning ("Do you know the answer" → "Do the answer").
     public static let fillerWords: Set<String> = [
-        "um", "uh", "uhh", "umm", "uhm", "er", "err", "erm", "ah", "hmm", "mhm",
-        "you know", "i mean"
+        "um", "uh", "uhh", "umm", "uhm", "er", "err", "erm", "ah", "hmm", "mhm"
     ]
 
     /// Collapse runs of whitespace to single spaces and trim ends. Newlines are
@@ -39,7 +40,11 @@ public enum TextNormalizer {
         for word in singles {
             result = replaceWord(word, in: result)
         }
-        return normalizeWhitespace(result.replacingOccurrences(of: " ,", with: ","))
+        result = result.replacingOccurrences(of: " ,", with: ",")
+        // Strip orphaned leading punctuation/space left after removing a leading
+        // filler ("um, hello" → ", hello" → "hello").
+        result = result.replacingOccurrences(of: "^[,\\s]+", with: "", options: .regularExpression)
+        return normalizeWhitespace(result)
     }
 
     private static func replaceWord(_ word: String, in text: String) -> String {
@@ -61,10 +66,19 @@ public enum TextNormalizer {
             if capitalizeNext, c.isLetter {
                 chars[i] = Character(String(c).uppercased())
                 capitalizeNext = false
-            } else if ".!?".contains(c) {
-                capitalizeNext = true
             } else if c == "\n" {
                 capitalizeNext = true
+            } else if "!?".contains(c) {
+                capitalizeNext = true
+            } else if c == "." {
+                // Don't treat a period as a sentence end when it's a decimal
+                // (digit before: "3.14") or a single-letter initialism
+                // ("U.S.", "e.g.") — those would wrongly capitalize the next word.
+                let prev = i > 0 ? chars[i - 1] : " "
+                let prevPrev = i > 1 ? chars[i - 2] : " "
+                let isDecimal = prev.isNumber
+                let isInitialism = prev.isLetter && !prevPrev.isLetter
+                if !isDecimal && !isInitialism { capitalizeNext = true }
             }
         }
         return String(chars)
@@ -84,28 +98,44 @@ public enum TextNormalizer {
     /// Convert common spoken punctuation words to symbols. Used for prose modes,
     /// NOT for code mode (where "period" may be literal).
     public static func applySpokenPunctuation(_ text: String) -> String {
+        // Longer phrases first so "new paragraph" isn't caught by "new line" etc.
+        // Each is matched as a WHOLE WORD/PHRASE so ordinary words are never
+        // mangled ("run the command" must NOT become "run the,nd").
         let replacements: [(String, String)] = [
-            (" period", "."),
-            (" comma", ","),
-            (" question mark", "?"),
-            (" exclamation point", "!"),
-            (" exclamation mark", "!"),
-            (" new line", "\n"),
-            (" new paragraph", "\n\n"),
-            (" colon", ":"),
-            (" semicolon", ";"),
-            (" open paren", " ("),
-            (" close paren", ")")
+            ("new paragraph", "\n\n"),
+            ("new line", "\n"),
+            ("question mark", "?"),
+            ("exclamation point", "!"),
+            ("exclamation mark", "!"),
+            ("open paren", "("),
+            ("close paren", ")"),
+            ("semicolon", ";"),
+            ("period", "."),
+            ("comma", ","),
+            ("colon", ":")
         ]
         var result = text
         for (spoken, symbol) in replacements {
-            result = result.replacingOccurrences(of: spoken, with: symbol, options: [.caseInsensitive])
+            result = replaceSpoken(spoken, with: symbol, in: result)
         }
         // Tidy spaces that precede punctuation after substitution.
-        result = result.replacingOccurrences(of: " .", with: ".")
-        result = result.replacingOccurrences(of: " ,", with: ",")
-        result = result.replacingOccurrences(of: " ?", with: "?")
-        result = result.replacingOccurrences(of: " !", with: "!")
-        return result
+        for p in [".", ",", "?", "!", ":", ";", ")"] {
+            result = result.replacingOccurrences(of: " " + p, with: p)
+        }
+        result = result.replacingOccurrences(of: "( ", with: "(")
+        return normalizeWhitespace(result)
+    }
+
+    /// Replace a spoken punctuation phrase with its symbol, matching only whole
+    /// words (word-boundary anchored) so it never eats part of a real word.
+    private static func replaceSpoken(_ phrase: String, with symbol: String, in text: String) -> String {
+        let escaped = phrase.split(whereSeparator: { $0.isWhitespace })
+            .map { NSRegularExpression.escapedPattern(for: String($0)) }
+            .joined(separator: "\\s+")
+        let pattern = "(?<![A-Za-z0-9])" + escaped + "(?![A-Za-z0-9])"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return text }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        let template = NSRegularExpression.escapedTemplate(for: symbol)
+        return regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: template)
     }
 }

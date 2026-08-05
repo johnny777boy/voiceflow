@@ -109,7 +109,10 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
         guard let url = takeFileURL() else { throw VoiceFlowError.emptyTranscript }
         defer { try? FileManager.default.removeItem(at: url) }
 
-        let locale = Locale(identifier: preferredLanguage)
+        // Resolve to a locale the recognizer actually supports (region-aware), from
+        // the requested language code (falling back to the preferred language).
+        let requested = Locale(identifier: languageCode.isEmpty ? preferredLanguage : languageCode)
+        let locale = await SpeechTranscriber.supportedLocale(equivalentTo: requested) ?? requested
         try await Self.ensureModelInstalled(locale: locale)
 
         // No volatile/interim results — we only want stable, FINAL segments for a
@@ -122,6 +125,15 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
             attributeOptions: []
         )
         let analyzer = SpeechAnalyzer(modules: [transcriber])
+
+        // Bias recognition toward the user's names/terms/jargon. This was declared
+        // but silently dropped — the single highest-value accuracy fix.
+        let terms = contextualStrings
+        if !terms.isEmpty {
+            let context = AnalysisContext()
+            context.contextualStrings = [.general: terms]
+            try? await analyzer.setContext(context)
+        }
 
         // Start consuming results BEFORE feeding audio so no early segment is lost.
         // Accumulate only final segments, in time order, joined with single spaces.
@@ -151,8 +163,8 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
 
     private static func ensureModelInstalled(locale: Locale) async throws {
         let installed = await SpeechTranscriber.installedLocales
-        let want = locale.language.languageCode
-        if installed.contains(where: { $0.language.languageCode == want }) { return }
+        // Region-aware: en-US must not be considered satisfied by an installed en-GB.
+        if installed.contains(where: { $0.identifier == locale.identifier }) { return }
         _ = try? await AssetInventory.reserve(locale: locale)
         let transcriber = SpeechTranscriber(locale: locale, preset: .transcription)
         if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
