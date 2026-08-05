@@ -39,26 +39,13 @@ public struct DestinationSnapshot: Codable, Sendable, Equatable, Hashable {
 
     /// Whether two snapshots refer to the same insertion destination.
     ///
-    /// Window titles and element identifiers are intentionally *not* required to
-    /// match, because legitimate destinations (terminals, editors) mutate their
-    /// titles constantly while dictation runs. The application identity is the
-    /// hard requirement; field identity is used as a soft signal when present.
+    /// The **application identity** is the destination guarantee (don't insert into
+    /// a different app). Field-level signals — window title, element role/identifier
+    /// — are intentionally NOT required to match: they change constantly and, in
+    /// Electron/web apps (Claude Code, Slack, browsers), differ between capture and
+    /// insertion, which would wrongly reject a valid destination and divert to the
+    /// clipboard. Secure-field protection is handled separately by the guard.
     public func matches(_ other: DestinationSnapshot) -> Bool {
-        // Application identity must match.
-        guard bundleIdentifier == other.bundleIdentifier else { return false }
-
-        // If both snapshots expose a focused-element identifier, they must agree.
-        if let a = focusedElementIdentifier, let b = other.focusedElementIdentifier,
-           !a.isEmpty, !b.isEmpty {
-            return a == b
-        }
-
-        // Otherwise, require the focused role to be consistent when both known.
-        if let a = focusedElementRole, let b = other.focusedElementRole,
-           !a.isEmpty, !b.isEmpty {
-            return a == b
-        }
-
-        return true
+        bundleIdentifier == other.bundleIdentifier
     }
 }

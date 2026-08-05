@@ -11,14 +11,16 @@ func runModelTests(_ s: TestSuite) {
         s.expectFalse(MockActiveAppProvider.terminal().matches(MockActiveAppProvider.safari()))
     }
 
-    s.test("DestinationSnapshot rejects mismatched focused element identifier") { s in
-        let a = DestinationSnapshot(bundleIdentifier: "com.x", appName: "X", windowTitle: nil,
+    s.test("DestinationSnapshot matches same app despite differing field info") { s in
+        // Field role/identifier/title change constantly (esp. in Electron/web apps);
+        // same app == same destination so the text still inserts.
+        let a = DestinationSnapshot(bundleIdentifier: "com.x", appName: "X", windowTitle: "a",
             focusedElementRole: "AXTextArea", focusedElementIdentifier: "field-1",
             isSecureInput: false, capturedAt: .init(timeIntervalSinceReferenceDate: 0))
-        let b = DestinationSnapshot(bundleIdentifier: "com.x", appName: "X", windowTitle: nil,
-            focusedElementRole: "AXTextArea", focusedElementIdentifier: "field-2",
+        let b = DestinationSnapshot(bundleIdentifier: "com.x", appName: "X", windowTitle: "b",
+            focusedElementRole: "AXWebArea", focusedElementIdentifier: "field-2",
             isSecureInput: false, capturedAt: .init(timeIntervalSinceReferenceDate: 0))
-        s.expectFalse(a.matches(b))
+        s.expect(a.matches(b))
     }
 
     s.test("Settings resolves per-app mode") { s in

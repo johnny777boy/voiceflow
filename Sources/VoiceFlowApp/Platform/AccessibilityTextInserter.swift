@@ -107,30 +107,40 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
         pb.clearContents()
         pb.setString(text, forType: .string)
 
+        // Give the pasteboard a beat to settle, then paste.
+        Thread.sleep(forTimeInterval: 0.03)
         guard synthesizeCommandV() else {
             throw VoiceFlowError.insertionFailed("could not synthesize paste keystroke")
         }
 
-        // Restore the previous clipboard shortly after paste is delivered.
-        let restoreDelay: TimeInterval = 0.15
+        // Restore the previous clipboard AFTER the target app has had time to read
+        // it. Too short and slow apps (Electron) read the restored (old) clipboard.
+        let restoreDelay: TimeInterval = 0.6
         DispatchQueue.main.asyncAfter(deadline: .now() + restoreDelay) {
             pb.clearContents()
             if let previous { pb.setString(previous, forType: .string) }
         }
     }
 
-    /// Synthesize a Cmd-V keystroke into the frontmost app.
+    /// Synthesize a full Command+V sequence into the frontmost app. Posting the
+    /// explicit Command key down/up (not just the flag) is more reliable across apps.
     private func synthesizeCommandV() -> Bool {
         guard let source = CGEventSource(stateID: .combinedSessionState) else { return false }
+        let cmdKey = CGKeyCode(kVK_Command)
         let vKey = CGKeyCode(kVK_ANSI_V)
-        guard let down = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: true),
-              let up = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: false) else {
+        guard let cmdDown = CGEvent(keyboardEventSource: source, virtualKey: cmdKey, keyDown: true),
+              let vDown = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: true),
+              let vUp = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: false),
+              let cmdUp = CGEvent(keyboardEventSource: source, virtualKey: cmdKey, keyDown: false) else {
             return false
         }
-        down.flags = .maskCommand
-        up.flags = .maskCommand
-        down.post(tap: .cghidEventTap)
-        up.post(tap: .cghidEventTap)
+        vDown.flags = .maskCommand
+        vUp.flags = .maskCommand
+        let tap: CGEventTapLocation = .cghidEventTap
+        cmdDown.post(tap: tap)
+        vDown.post(tap: tap)
+        vUp.post(tap: tap)
+        cmdUp.post(tap: tap)
         return true
     }
 }
