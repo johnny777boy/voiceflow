@@ -96,9 +96,11 @@ final class GlobalHotkeyManager: HotkeyManaging, @unchecked Sendable {
         if f.contains(.control)  { set.insert(.control) }
         if f.contains(.shift)    { set.insert(.shift) }
         if f.contains(.function) { set.insert(.function) }
-        // Left Option: the fn-changed event's key code is 58 (kVK_Option) and
-        // Option is currently down.
-        if event.keyCode == 58, f.contains(.option) { set.insert(.leftOption) }
+        // Left Option via the underlying CGEvent device-flag bit
+        // (NX_DEVICELALTKEYMASK = 0x20). This is set on ANY flags-changed event
+        // while left ⌥ is held, so unrelated key presses don't spuriously end the
+        // chord (which was splitting one dictation into several).
+        if let cg = event.cgEvent, (cg.flags.rawValue & 0x20) != 0 { set.insert(.leftOption) }
         return set
     }
 }
