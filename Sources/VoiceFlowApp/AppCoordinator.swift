@@ -12,6 +12,8 @@ import VoiceFlowCore
 final class AppCoordinator: ObservableObject {
     @Published var settings: AppSettings
     @Published private(set) var isRecording = false
+    /// Live mic level (0…1) for the in-window recording animation.
+    @Published private(set) var audioLevel: CGFloat = 0
     @Published private(set) var statusText = "Ready"
     @Published private(set) var lastResult: DictationResult?
     @Published private(set) var recentRecords: [TranscriptRecord] = []
@@ -80,10 +82,15 @@ final class AppCoordinator: ObservableObject {
     func start() {
         guard !didStart else { return }   // idempotent: safe if invoked more than once
         didStart = true
-        // Feed the live mic level into the floating waveform pill.
+        // Feed the live mic level into the floating waveform pill AND the window.
         live.levelHandler = { [weak self] level in
-            Task { @MainActor in self?.overlay.updateLevel(level) }
+            Task { @MainActor in
+                self?.overlay.updateLevel(level)
+                self?.audioLevel = CGFloat(level)
+            }
         }
+        // Bias recognition toward the user's saved names/terms.
+        live.contextualStrings = contextualStrings(from: settings)
         refreshPermissionStatus()
         _ = AX.hasAccessibilityPermission(prompt: true)   // nudge the AX prompt once
         InputMonitoring.request()                         // nudge the Input Monitoring prompt
@@ -276,12 +283,20 @@ final class AppCoordinator: ObservableObject {
 
     // MARK: - Settings & history
 
+    /// Recognition hints from the user's enabled vocabulary (their spelling of
+    /// names/terms), so the recognizer is biased toward them.
+    private func contextualStrings(from s: AppSettings) -> [String] {
+        let terms = s.vocabulary.filter { $0.isEnabled }.flatMap { [$0.written, $0.spoken] }
+        return Array(Set(terms.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty })).prefix(100).map { $0 }
+    }
+
     func applySettings(_ new: AppSettings) {
         let hotkeyChanged = new.hotkey != settings.hotkey
         let loginChanged = new.launchAtLogin != settings.launchAtLogin
         settings = new
         try? settingsStore.save(new)
         live.preferredLanguage = new.languageCode
+        live.contextualStrings = contextualStrings(from: new)
         Task { await controller.updateSettings(new) }
         if hotkeyChanged { registerHotkey() }
         if loginChanged { LoginItemManager.setEnabled(new.launchAtLogin) }
