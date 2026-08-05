@@ -14,7 +14,7 @@ import VoiceFlowCore
 ///
 /// One object conforms to both `AudioRecording` and `Transcribing` so the
 /// `DictationController` flow is unchanged.
-final class LiveSpeechDictation: AudioRecording, Transcribing, @unchecked Sendable {
+final class LiveSpeechDictation: SpeechEngine, @unchecked Sendable {
     /// BCP-47 language for recognition; updated from settings.
     var preferredLanguage: String = "en-US"
 
