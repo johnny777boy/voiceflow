@@ -123,6 +123,45 @@ func runCleanupTests(_ s: TestSuite) {
     s.test("Real spoken punctuation still converts") { s in
         s.expectEqual(engine.cleanSync("wait comma stop", context: ctx(.cleanWriting)), "Wait, stop.")
     }
+
+    // MARK: - CleanupGuard (meaning-preservation for the on-device LLM stage)
+
+    s.test("Guard REJECTS a dropped negation (meaning flip)") { s in
+        // Codex's dangerous false-negative: "do not delete" -> "do delete".
+        s.expect(!CleanupGuard.preservesMeaning(
+            original: "do not delete the file after review",
+            cleaned: "Do delete the file after review."), "negation flip rejected")
+        s.expect(!CleanupGuard.preservesMeaning(original: "I can go", cleaned: "I cannot go"),
+                 "added negation rejected")
+    }
+
+    s.test("Guard keeps a negation rephrased faithfully") { s in
+        s.expect(CleanupGuard.preservesMeaning(original: "do not touch it", cleaned: "Don't touch it."),
+                 "'do not' -> \"don't\" preserved")
+    }
+
+    s.test("Guard ACCEPTS a heavy non-native grammar rewrite") { s in
+        // Codex's false-positive case must now pass.
+        s.expect(CleanupGuard.preservesMeaning(
+            original: "I am interesting for discuss this problematic with your recommend tomorrow",
+            cleaned: "I am interested in discussing this issue with your recommendation tomorrow."),
+                 "legit rewrite accepted")
+    }
+
+    s.test("Guard REJECTS a changed number") { s in
+        s.expect(!CleanupGuard.preservesMeaning(original: "meet at 3 today", cleaned: "Meet at 4 today."),
+                 "number change rejected")
+        s.expect(CleanupGuard.preservesMeaning(original: "review version 3.14 now", cleaned: "Review version 3.14 now."),
+                 "same numbers accepted")
+    }
+
+    s.test("Guard REJECTS balloon and gut") { s in
+        s.expect(!CleanupGuard.preservesMeaning(original: "hello there friend",
+                 cleaned: "Hello there friend, and by the way here is a long unrelated addition that keeps going on and on."),
+                 "balloon rejected")
+        s.expect(!CleanupGuard.preservesMeaning(original: "please schedule the meeting for tomorrow afternoon", cleaned: "OK."),
+                 "gut rejected")
+    }
 }
 
 private struct FailingLLM: CleanupProviding {
