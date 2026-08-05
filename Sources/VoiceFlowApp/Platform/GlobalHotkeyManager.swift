@@ -1,70 +1,44 @@
 import Foundation
 import AppKit
-import Carbon.HIToolbox
 import VoiceFlowCore
 
-/// System-wide push-to-talk / toggle hotkey via a CGEvent tap. Requires
-/// Accessibility permission to observe key events globally.
+/// System-wide push-to-talk / toggle hotkey via `NSEvent` monitors (global +
+/// local). This is simpler and more reliable than a CGEvent tap for observing
+/// key/modifier events; it requires Accessibility permission. It does not consume
+/// events, which is fine for a pure-modifier hold (e.g. Option) that never types.
 final class GlobalHotkeyManager: HotkeyManaging, @unchecked Sendable {
-    private var eventTap: CFMachPort?
-    private var runLoopSource: CFRunLoopSource?
+    private var globalMonitor: Any?
+    private var localMonitor: Any?
     private var configuration: HotkeyConfiguration?
     private var handler: (@Sendable (HotkeyEvent) -> Void)?
     private var isChordDown = false
 
-    /// Whether a live event tap currently exists (i.e. registration succeeded).
-    var isActive: Bool { eventTap != nil }
+    /// Whether monitors are installed.
+    var isActive: Bool { globalMonitor != nil || localMonitor != nil }
 
     func register(_ configuration: HotkeyConfiguration, handler: @escaping @Sendable (HotkeyEvent) -> Void) {
         unregister()
         self.configuration = configuration
         self.handler = handler
 
-        // Include flagsChanged so a modifier release (while the main key is still
-        // held) can end a push-to-talk chord.
-        let mask: CGEventMask = (1 << CGEventType.keyDown.rawValue)
-            | (1 << CGEventType.keyUp.rawValue)
-            | (1 << CGEventType.flagsChanged.rawValue)
-        let refcon = Unmanaged.passUnretained(self).toOpaque()
-
-        guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .defaultTap,   // active tap so we can CONSUME the hotkey key
-            eventsOfInterest: mask,
-            callback: { _, type, event, refcon in
-                var consume = false
-                if let refcon {
-                    let manager = Unmanaged<GlobalHotkeyManager>.fromOpaque(refcon).takeUnretainedValue()
-                    consume = manager.handle(type: type, event: event)
-                }
-                // Returning nil discards the event (so the push-to-talk key does
-                // not type a character); otherwise pass it through unchanged.
-                return consume ? nil : Unmanaged.passUnretained(event)
-            },
-            userInfo: refcon
-        ) else {
-            Log.hotkey.error("Failed to create event tap (missing Accessibility permission?)")
-            return
+        let mask: NSEvent.EventTypeMask = [.flagsChanged, .keyDown, .keyUp]
+        // Global monitor: fires when OTHER apps are focused (needs Accessibility).
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] event in
+            self?.process(event)
         }
-
-        self.eventTap = tap
-        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-        self.runLoopSource = source
-        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
-        CGEvent.tapEnable(tap: tap, enable: true)
-        Log.hotkey.info("Registered hotkey \(configuration.displayString, privacy: .public)")
+        // Local monitor: fires when VoiceFlow itself is focused.
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
+            self?.process(event)
+            return event
+        }
+        Log.hotkey.notice("hotkey monitors installed for \(configuration.displayString, privacy: .public) (global=\(self.globalMonitor != nil), local=\(self.localMonitor != nil))")
     }
 
     func unregister() {
-        if let tap = eventTap {
-            CGEvent.tapEnable(tap: tap, enable: false)
-        }
-        if let source = runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
-        }
-        eventTap = nil
-        runLoopSource = nil
+        if let globalMonitor { NSEvent.removeMonitor(globalMonitor) }
+        if let localMonitor { NSEvent.removeMonitor(localMonitor) }
+        globalMonitor = nil
+        localMonitor = nil
         configuration = nil
         handler = nil
         isChordDown = false
@@ -72,88 +46,59 @@ final class GlobalHotkeyManager: HotkeyManaging, @unchecked Sendable {
 
     // MARK: - Event handling
 
-    /// Handle a tapped event. Returns `true` if the event should be **consumed**
-    /// (swallowed) so the hotkey key doesn't type a character.
-    private func handle(type: CGEventType, event: CGEvent) -> Bool {
-        // The system disables an active tap if the callback is ever too slow;
-        // re-enable it so the hotkey keeps working.
-        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-            if let eventTap { CGEvent.tapEnable(tap: eventTap, enable: true) }
-            return false
-        }
-        guard let config = configuration, let handler else { return false }
+    private func process(_ event: NSEvent) {
+        guard let config = configuration, let handler else { return }
 
-        let present = Self.modifierSet(from: event.flags)
-        let modsOK = HotkeyMatcher.matches(
-            required: HotkeyMatcher.decode(carbonMask: config.modifierFlags), present: present)
-
-        // A modifier changed (no key up/down).
-        if type == .flagsChanged {
-            if config.keyCode == nil && config.isPushToTalk {
-                // Single-key / pure-modifier hold-to-talk: the modifier IS the
-                // trigger. Press when it goes down, release when it comes up.
+        // Pure single-key / modifier hold (keyCode == nil): driven by flag changes.
+        if config.keyCode == nil {
+            guard event.type == .flagsChanged else { return }
+            let present = Self.modifierSet(from: event)
+            let required = HotkeyMatcher.decode(carbonMask: config.modifierFlags)
+            let modsOK = HotkeyMatcher.matches(required: required, present: present)
+            if config.isPushToTalk {
                 if modsOK && !isChordDown { isChordDown = true; handler(.pressed) }
                 else if !modsOK && isChordDown { isChordDown = false; handler(.released) }
-                return false   // never consume modifier events
-            }
-            // Keyed chord: a modifier change only ENDS a held chord.
-            if HotkeyMatcher.shouldEndChord(isChordDown: isChordDown,
-                                            isPushToTalk: config.isPushToTalk,
-                                            modifiersStillMatch: modsOK) {
+            } else if modsOK && !isChordDown {
+                isChordDown = true; handler(.toggled)
+            } else if !modsOK {
                 isChordDown = false
-                handler(.released)
             }
-            return false
+            return
         }
 
-        // From here on it's a keyed (non-pure-modifier) hotkey. Gate on the code.
-        guard let configuredKey = config.keyCode else { return false }
-        let keyCode = UInt32(event.getIntegerValueField(.keyboardEventKeycode))
-        guard configuredKey == keyCode else { return false }
+        // Keyed hotkey (a normal key, optionally with modifiers).
+        guard event.type == .keyDown || event.type == .keyUp else { return }
+        guard UInt32(event.keyCode) == config.keyCode else { return }
+        let present = Self.modifierSet(from: event)
+        let modsOK = HotkeyMatcher.matches(required: HotkeyMatcher.decode(carbonMask: config.modifierFlags), present: present)
 
-        guard modsOK else {
-            // Chord broken (modifier released together with a key event).
-            if type == .keyUp,
-               HotkeyMatcher.shouldEndChord(isChordDown: isChordDown,
-                                            isPushToTalk: config.isPushToTalk,
-                                            modifiersStillMatch: false) {
-                isChordDown = false
-                handler(.released)
-                return true   // consume the matching key-up that ended the chord
-            }
-            return false
-        }
-
-        switch type {
-        case .keyDown:
-            let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+        switch event.type {
+        case .keyDown where modsOK:
             if config.isPushToTalk {
-                if !isChordDown { isChordDown = true; handler(.pressed) }   // ignores auto-repeat via isChordDown
-            } else if !isRepeat {
-                handler(.toggled)   // one toggle per physical press, not per auto-repeat
+                if !isChordDown { isChordDown = true; handler(.pressed) }   // ignores key auto-repeat
+            } else if !event.isARepeat {
+                handler(.toggled)
             }
-            return true   // consume the hotkey key-down (and its auto-repeats)
         case .keyUp:
-            if config.isPushToTalk && isChordDown {
-                isChordDown = false
-                handler(.released)
-            }
-            return true   // consume the matching key-up
+            if config.isPushToTalk && isChordDown { isChordDown = false; handler(.released) }
         default:
-            return false
+            break
         }
     }
 
-    /// Map live CGEvent modifier flags into the platform-agnostic `ModifierSet`.
-    private static func modifierSet(from flags: CGEventFlags) -> ModifierSet {
+    /// Map an NSEvent's modifiers into the platform-agnostic set, distinguishing
+    /// LEFT Option via the physical key code (58) on a flags-changed event.
+    static func modifierSet(from event: NSEvent) -> ModifierSet {
+        let f = event.modifierFlags
         var set: ModifierSet = []
-        if flags.contains(.maskCommand) { set.insert(.command) }
-        if flags.contains(.maskAlternate) { set.insert(.option) }
-        if flags.contains(.maskControl) { set.insert(.control) }
-        if flags.contains(.maskShift) { set.insert(.shift) }
-        if flags.contains(.maskSecondaryFn) { set.insert(.function) }   // fn / Globe
-        // Device-dependent bit: LEFT ⌥ is NX_DEVICELALTKEYMASK (0x20).
-        if (flags.rawValue & 0x20) != 0 { set.insert(.leftOption) }
+        if f.contains(.command)  { set.insert(.command) }
+        if f.contains(.option)   { set.insert(.option) }
+        if f.contains(.control)  { set.insert(.control) }
+        if f.contains(.shift)    { set.insert(.shift) }
+        if f.contains(.function) { set.insert(.function) }
+        // Left Option: the fn-changed event's key code is 58 (kVK_Option) and
+        // Option is currently down.
+        if event.keyCode == 58, f.contains(.option) { set.insert(.leftOption) }
         return set
     }
 }
