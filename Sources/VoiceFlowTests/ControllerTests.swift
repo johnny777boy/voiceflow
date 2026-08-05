@@ -32,7 +32,7 @@ func runControllerTests(_ s: TestSuite) {
         }
         s.expectNotNil(result)
         guard let result else { return }
-        s.expectEqual(result.plan.strategy, .accessibility)
+        s.expectEqual(result.plan.strategy, .clipboardPaste)   // paste is the universal default
         s.expect(result.outcome.didInsert)
         s.expectEqual(inserter.insertedText, "git status")   // code mode keeps it literal
         s.expectEqual(try history.allRecords().count, 1)
