@@ -45,9 +45,12 @@ final class OverlayController {
         }
     }
 
-    /// Push a fresh mic level (0…1) into the live waveform.
+    /// Push a fresh mic level (0…1) into the live waveform. Smoothed so the bars
+    /// glide instead of jittering (attack faster than release, like a VU meter).
     func updateLevel(_ level: Float) {
-        model.level = CGFloat(max(0, min(1, level)))
+        let v = CGFloat(max(0, min(1, level)))
+        let smoothing: CGFloat = v > model.level ? 0.5 : 0.82   // fast rise, slow fall
+        model.level = model.level * smoothing + v * (1 - smoothing)
     }
 
     func hide() {
