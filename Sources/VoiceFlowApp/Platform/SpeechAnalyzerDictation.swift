@@ -71,7 +71,7 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
         }
         lock.lock(); self.audioFile = file; self.fileURL = url; lock.unlock()
 
-        input.installTap(onBus: 0, bufferSize: 4096, format: tapFormat) { [weak self] buffer, _ in
+        input.installTap(onBus: 0, bufferSize: 1024, format: tapFormat) { [weak self] buffer, _ in
             guard let self else { return }
             self.lock.lock(); try? self.audioFile?.write(from: buffer); self.lock.unlock()
             if let h = self.levelHandler { h(Self.level(of: buffer)) }
@@ -89,11 +89,16 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
 
     private func stopRecordingImpl() throws -> AudioCapture {
         guard isRecording else { return AudioCapture(samples: [], sampleRate: 16_000, duration: 0) }
-        engine?.inputNode.removeTap(onBus: 0)
-        engine?.stop()
-        engine = nil
-        lock.lock(); self.audioFile = nil; lock.unlock()   // closes/flushes the file
         isRecording = false
+        // Drain: the tap runs on the audio render thread, so this brief pause lets it
+        // capture the trailing audio (the last word) that would otherwise be lost when
+        // we tear the engine down the instant the key is released. Then stop the engine,
+        // remove the tap, and close the file LAST so those final buffers are written.
+        Thread.sleep(forTimeInterval: 0.18)
+        engine?.stop()
+        engine?.inputNode.removeTap(onBus: 0)
+        engine = nil
+        lock.lock(); self.audioFile = nil; lock.unlock()   // closes/flushes the file after the last writes
         levelHandler?(0)
         return AudioCapture(samples: [], sampleRate: 16_000, duration: 0)
     }
