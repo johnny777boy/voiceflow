@@ -23,7 +23,7 @@ final class AppCoordinator: ObservableObject {
     @Published private(set) var inputMonitoringGranted = false
 
     private let controller: DictationController
-    private let live: LiveSpeechDictation
+    private let live: SpeechEngine
     private let hotkeys: GlobalHotkeyManager
     private let settingsStore: SettingsStore
     private let history: HistoryStoring
@@ -61,10 +61,19 @@ final class AppCoordinator: ObservableObject {
             llmProvider: LLMCleanupProvider(secureStore: secureStore),
             useLLM: loaded.useLLMCleanup
         )
-        // One live engine serves both the audio and transcription seams so
-        // recognition streams while you speak (captures full-length dictation).
-        let live = LiveSpeechDictation()
-        live.preferredLanguage = loaded.languageCode
+        // Pick the best engine: on macOS 26 use Apple's SpeechAnalyzer (records the
+        // whole clip, then transcribes with full context — far more accurate).
+        // Otherwise fall back to the legacy streaming engine.
+        let engine: SpeechEngine
+        if #available(macOS 26.0, *), SpeechTranscriber.isAvailable {
+            engine = SpeechAnalyzerDictation()
+            Log.transcription.notice("engine: SpeechAnalyzer (macOS 26)")
+        } else {
+            engine = LiveSpeechDictation()
+            Log.transcription.notice("engine: legacy SFSpeechRecognizer")
+        }
+        engine.preferredLanguage = loaded.languageCode
+        let live = engine
         self.live = live
         self.controller = DictationController(
             audio: live,
@@ -127,7 +136,7 @@ final class AppCoordinator: ObservableObject {
 
     private func requestPermissions() async {
         _ = await AudioEngineRecorder().requestPermission()
-        _ = await SpeechTranscriber().requestPermission()
+        _ = await SFSpeechTranscriberWrapper().requestPermission()
         await MainActor.run { refreshPermissionStatus() }
     }
 

@@ -6,7 +6,7 @@ import VoiceFlowCore
 /// Apple on-device speech recognition (SFSpeechRecognizer). Reconstructs a PCM
 /// buffer from the captured samples and runs a buffer-based recognition request,
 /// preferring on-device recognition for privacy.
-final class SpeechTranscriber: Transcribing, @unchecked Sendable {
+final class SFSpeechTranscriberWrapper: Transcribing, @unchecked Sendable {
     /// Max time to wait for a final result after `endAudio()` before giving up.
     private let timeout: TimeInterval
 
