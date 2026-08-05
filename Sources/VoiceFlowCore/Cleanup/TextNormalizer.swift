@@ -95,6 +95,24 @@ public enum TextNormalizer {
         return trimmed
     }
 
+    /// Final prose tidy: collapse doubled sentence punctuation ("it.. our" → "it. our"),
+    /// repeated commas, and stray spaces before punctuation — artifacts that appear
+    /// when speech segments are stitched together or the LLM leaves a seam. Then
+    /// re-capitalize sentence starts. NOT for code mode (would break "0..2", paths).
+    public static func tidyProse(_ text: String) -> String {
+        var t = text
+        t = t.replacingOccurrences(of: "\\.{2,}", with: ".", options: .regularExpression)   // ".."/"..." → "."
+        t = t.replacingOccurrences(of: "\\?{2,}", with: "?", options: .regularExpression)
+        t = t.replacingOccurrences(of: "!{2,}", with: "!", options: .regularExpression)
+        t = t.replacingOccurrences(of: ",\\s*,", with: ",", options: .regularExpression)     // ", ," → ","
+        t = t.replacingOccurrences(of: "\\.\\s+\\.", with: ".", options: .regularExpression) // ". ." → "."
+        for p in [".", ",", "?", "!", ":", ";"] {
+            t = t.replacingOccurrences(of: " " + p, with: p)
+        }
+        t = normalizeWhitespace(t)
+        return capitalizeSentences(t)
+    }
+
     /// Convert common spoken punctuation words to symbols. Used for prose modes,
     /// NOT for code mode (where "period" may be literal).
     public static func applySpokenPunctuation(_ text: String) -> String {

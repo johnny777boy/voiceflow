@@ -22,23 +22,26 @@ public struct CleanupPipeline: CleanupProviding {
     public func clean(_ rawText: String, context: CleanupContext) async throws -> String {
         let base = ruleEngine.cleanSync(rawText, context: context)
 
+        var result = base
         // Raw mode and "off" strength never get LLM refinement.
-        guard useLLM, context.mode != .raw, context.strength != .off, let llmProvider else {
-            return base
+        if useLLM, context.mode != .raw, context.strength != .off, let llmProvider {
+            do {
+                let refined = try await llmProvider.clean(base, context: context)
+                let trimmed = refined.trimmingCharacters(in: .whitespacesAndNewlines)
+                result = trimmed.isEmpty ? base : trimmed
+                Log.cleanup.notice("AI cleanup applied (\(base.count, privacy: .public)→\(result.count, privacy: .public) chars)")
+            } catch VoiceFlowError.cleanupProviderUnavailable {
+                Log.cleanup.notice("AI cleanup unavailable; rule-based result")
+            } catch {
+                Log.cleanup.error("AI cleanup failed, using rule-based result: \(String(describing: error), privacy: .public)")
+            }
         }
 
-        do {
-            let refined = try await llmProvider.clean(base, context: context)
-            let trimmed = refined.trimmingCharacters(in: .whitespacesAndNewlines)
-            // Guard against an LLM that returns nothing useful; return the trimmed
-            // form so no stray leading/trailing whitespace reaches insertion.
-            return trimmed.isEmpty ? base : trimmed
-        } catch VoiceFlowError.cleanupProviderUnavailable {
-            // No API key configured — expected; use the rule-based result silently.
-            return base
-        } catch {
-            Log.cleanup.error("LLM cleanup failed, using rule-based result: \(String(describing: error), privacy: .public)")
-            return base
+        // Final prose tidy: kill doubled punctuation / segment-seam artifacts
+        // ("fix it.. our system." → "fix it. Our system.").
+        if context.mode == .cleanWriting || context.mode == .email {
+            result = TextNormalizer.tidyProse(result)
         }
+        return result
     }
 }
