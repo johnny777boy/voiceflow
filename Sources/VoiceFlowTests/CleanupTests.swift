@@ -124,6 +124,15 @@ func runCleanupTests(_ s: TestSuite) {
         s.expectEqual(engine.cleanSync("wait comma stop", context: ctx(.cleanWriting)), "Wait, stop.")
     }
 
+    s.test("tidyProse inserts missing spaces after punctuation, protects decimals/domains") { s in
+        s.expectEqual(TextNormalizer.tidyProse("Hello,world"), "Hello, world")
+        s.expectEqual(TextNormalizer.tidyProse("It works.Our system is next"), "It works. Our system is next")
+        // Must NOT split these:
+        s.expect(TextNormalizer.tidyProse("Review version 3.14 now").contains("3.14"), "kept 3.14")
+        s.expect(TextNormalizer.tidyProse("meet at 9:30 today").contains("9:30"), "kept 9:30")
+        s.expect(!TextNormalizer.tidyProse("e.g. this case").contains("e. g."), "kept e.g.")
+    }
+
     // MARK: - CleanupGuard (meaning-preservation for the on-device LLM stage)
 
     s.test("Guard REJECTS a dropped negation (meaning flip)") { s in

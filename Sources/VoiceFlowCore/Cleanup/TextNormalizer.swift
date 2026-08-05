@@ -109,6 +109,12 @@ public enum TextNormalizer {
         for p in [".", ",", "?", "!", ":", ";"] {
             t = t.replacingOccurrences(of: " " + p, with: p)
         }
+        // Insert a MISSING space AFTER punctuation that's glued to the next word
+        // ("word,next" → "word, next"). Safe for , ; : ? ! (never inside numbers).
+        t = t.replacingOccurrences(of: "([,;:?!])(?=[A-Za-z])", with: "$1 ", options: .regularExpression)
+        // A glued sentence break: lowercase + period + Uppercase ("it.Our" → "it. Our").
+        // The case constraints skip initialisms ("U.S.") and decimals ("3.14").
+        t = t.replacingOccurrences(of: "(?<=[a-z])\\.(?=[A-Z])", with: ". ", options: .regularExpression)
         t = normalizeWhitespace(t)
         return capitalizeSentences(t)
     }
