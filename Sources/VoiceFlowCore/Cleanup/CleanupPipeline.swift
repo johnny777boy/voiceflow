@@ -30,8 +30,9 @@ public struct CleanupPipeline: CleanupProviding {
         do {
             let refined = try await llmProvider.clean(base, context: context)
             let trimmed = refined.trimmingCharacters(in: .whitespacesAndNewlines)
-            // Guard against an LLM that returns nothing useful.
-            return trimmed.isEmpty ? base : refined
+            // Guard against an LLM that returns nothing useful; return the trimmed
+            // form so no stray leading/trailing whitespace reaches insertion.
+            return trimmed.isEmpty ? base : trimmed
         } catch VoiceFlowError.cleanupProviderUnavailable {
             // No API key configured — expected; use the rule-based result silently.
             return base
