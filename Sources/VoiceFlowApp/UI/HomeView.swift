@@ -137,7 +137,10 @@ struct HomeView: View {
                     Spacer()
                     Text(result.record.mode.displayName).font(.caption2).foregroundStyle(.secondary)
                 }
-                Text(result.record.cleanText).font(.callout).textSelection(.enabled).lineLimit(4)
+                Text(result.record.cleanText)
+                    .font(.callout).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
@@ -209,7 +212,11 @@ private struct HistoryCard: View {
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(record.cleanText).font(.callout).lineLimit(3)
+                Text(record.cleanText)
+                    .font(.callout)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)   // show the FULL script, wrapping
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 HStack(spacing: 8) {
                     Label(record.appName ?? "Unknown", systemImage: "app.dashed")
                         .font(.caption2).foregroundStyle(.secondary)

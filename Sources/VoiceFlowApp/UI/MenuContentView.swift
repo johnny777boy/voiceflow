@@ -88,7 +88,7 @@ private struct HistoryRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             VStack(alignment: .leading, spacing: 1) {
-                Text(record.cleanText).font(.caption).lineLimit(2)
+                Text(record.cleanText).font(.caption).lineLimit(5).fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 6) {
                     Text(record.appName ?? "Unknown").font(.caption2).foregroundStyle(.secondary)
                     Text(record.mode.displayName).font(.caption2).foregroundStyle(.tertiary)
