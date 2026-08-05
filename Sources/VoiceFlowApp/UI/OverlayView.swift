@@ -36,18 +36,10 @@ struct OverlayView: View {
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: titleText)
     }
 
+    // One clean, solid capsule — no glow layer behind it.
     private var pillBackground: some View {
-        ZStack {
-            Capsule().fill(Color(red: 0.07, green: 0.07, blue: 0.09).opacity(0.92))
-            // Soft accent glow while recording.
-            if isRecording {
-                Capsule().fill(Self.accent).opacity(0.14 + 0.12 * Double(model.level))
-                    .blur(radius: 8)
-            }
-        }
+        Capsule().fill(Color(red: 0.08, green: 0.08, blue: 0.10))
     }
-
-    private var isRecording: Bool { if case .recording = model.state { return true }; return false }
 
     @ViewBuilder private var leading: some View {
         switch model.state {
@@ -104,8 +96,8 @@ private struct WaveformBars: View {
     private func height(_ i: Int, _ t: Double) -> CGFloat {
         let minH: CGFloat = 2
         let maxH: CGFloat = 16
-        // Smooth level with a floor so it always breathes a little.
-        let energy = 0.12 + 0.88 * min(1, max(0, level))
+        // Idle floor so the bars always visibly flow; amplitude grows with voice.
+        let energy = 0.34 + 0.66 * min(1, max(0, level))
         // Bell-shaped envelope: centre bars taller than the edges.
         let center = CGFloat(count - 1) / 2
         let dist = abs(CGFloat(i) - center) / center           // 0 at centre, 1 at edges
