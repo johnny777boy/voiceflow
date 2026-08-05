@@ -95,6 +95,34 @@ func runCleanupTests(_ s: TestSuite) {
         let result = blockingAwait { (try? await pipeline.clean("this is a test", context: ctx(.cleanWriting))) ?? "ERR" }
         s.expectEqual(result, "This is a test.")
     }
+
+    // MARK: - Phase-0 regression guards (word garbling / bad capitalization)
+
+    s.test("Spoken-punctuation does not eat real words (command/colony/period)") { s in
+        s.expectEqual(engine.cleanSync("run the command", context: ctx(.cleanWriting)), "Run the command.")
+        s.expectEqual(engine.cleanSync("we visited the colony", context: ctx(.cleanWriting)), "We visited the colony.")
+        s.expect(!engine.cleanSync("the periodic table", context: ctx(.cleanWriting)).contains(". table"),
+                 "did not split 'periodic'")
+    }
+
+    s.test("Decimals are not treated as sentence ends") { s in
+        s.expectEqual(engine.cleanSync("version 3.14 is ready", context: ctx(.cleanWriting)), "Version 3.14 is ready.")
+    }
+
+    s.test("Initialisms do not trigger mid-sentence capitalization") { s in
+        s.expectEqual(engine.cleanSync("e.g. this is fine", context: ctx(.cleanWriting)), "E.g. this is fine.")
+    }
+
+    s.test("Meaningful phrases 'you know' / 'i mean' are preserved") { s in
+        s.expect(engine.cleanSync("do you know the answer", context: ctx(.cleanWriting)).lowercased().contains("you know"),
+                 "kept 'you know'")
+        s.expect(engine.cleanSync("i mean it", context: ctx(.cleanWriting)).lowercased().contains("i mean"),
+                 "kept 'i mean'")
+    }
+
+    s.test("Real spoken punctuation still converts") { s in
+        s.expectEqual(engine.cleanSync("wait comma stop", context: ctx(.cleanWriting)), "Wait, stop.")
+    }
 }
 
 private struct FailingLLM: CleanupProviding {
