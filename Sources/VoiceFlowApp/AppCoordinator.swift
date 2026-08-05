@@ -98,7 +98,9 @@ final class AppCoordinator: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 self.refreshPermissionStatus()
-                if self.accessibilityGranted, self.inputMonitoringGranted, !self.hotkeys.isActive {
+                // Always REBUILD the tap when perms are present: a tap created
+                // before a grant landed comes up dead and must be recreated.
+                if self.accessibilityGranted, self.inputMonitoringGranted {
                     self.registerHotkey()
                 }
             }
