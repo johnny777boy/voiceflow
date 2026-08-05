@@ -1,84 +1,83 @@
-# VoiceFlow — Accuracy Engine (Local Whisper) — Design
+# VoiceFlow — Accuracy + Cleanup Engine — Design (Phase 1)
 
 Date: 2026-08-05
-Status: Approved direction (local Whisper); spec for Phase 1.
+Status: Approved direction. Engine choice revised after research (see below).
 
 ## Problem
 
-Dictated words are wrong ("now the pill" → "not appeals"). Root cause is **not**
-the microphone or audio quality (capture is clean 48 kHz mono). It is two software
-issues:
+1. Dictated words are wrong ("now the pill" → "not appeals"). Not the mic — the
+   audio capture is clean 48 kHz mono. Cause: Apple's **legacy streaming**
+   recognizer (`SFSpeechRecognizer`) guesses words before hearing the sentence,
+   plus our pause-stitching drops a sliver of audio at each pause.
+2. The user wants the text to read as **clean, correct English** even when the
+   spoken words are rough ("Whisper somehow fixes it"). That is a separate
+   AI-cleanup layer, not transcription.
 
-1. **Streaming recognition guesses early.** `SFSpeechRecognizer` transcribes live,
-   committing to words before hearing the full sentence, so homophones and
-   context-dependent words come out wrong.
-2. **Pause-stitching drops audio.** The multi-segment restart (added for long
-   dictation) loses a fraction of a second of audio at each pause seam.
+## Research outcome (why the engine changed)
 
-## Goal
+- The user is on **macOS 26** (SDK 26.2 confirmed in this toolchain).
+- Apple's new **`SpeechAnalyzer` / `SpeechTranscriber`** (WWDC25) benchmarks
+  **better than Whisper Small** on English (2.12% vs 3.74% WER) and ~3× faster,
+  and cuts WER ~4× vs `SFSpeechRecognizer` (9% → 2%). On-device, private.
+- This machine has **no Metal compiler** (CLT only), so bundling whisper.cpp would
+  be CPU-only and slow, and adds ~1 GB. `SpeechAnalyzer` needs neither.
 
-Wispr-grade accuracy: record the whole utterance, transcribe it **once with full
-context** using a Whisper model, then insert. Private (on-device), offline, no
-per-use cost.
+**Decision: use `SpeechAnalyzer` + `SpeechTranscriber` as the engine.** It is more
+accurate than Whisper here, native, private, tiny, and needs no Metal. (Whisper is
+shelved unless we later need its 100-language coverage.)
 
-## Approach (chosen)
+## Two-layer pipeline
 
-Replace live streaming with **record → Whisper batch → clean → insert**:
+**Layer 1 — Transcription (`SpeechAnalyzer`).** Record while the key is held; on
+release, analyze the full audio with `SpeechTranscriber` (preset `.transcription`)
+and take the finalized result — full context, so homophones resolve. Feed the
+user's vocabulary via `AnalysisContext` contextual strings. Keep the live waveform
+pill during capture; show "Transcribing…" for the brief finalize.
 
-- **Capture:** while the key is held, tap the mic and accumulate the full audio
-  into a single buffer, resampled to **16 kHz mono Float32** (Whisper's native
-  input). No recognition during capture — the waveform pill is driven by the live
-  level as today.
-- **Transcribe on release:** feed the whole buffer to a local Whisper model via
-  `whisper.cpp` (Metal-accelerated on Apple Silicon). Model: `large-v3-turbo`
-  (best accuracy/speed), with a smaller `base.en`/`small.en` option for slower
-  machines.
-- **Latency:** ~1–2 s after release (the "Transcribing…" pill state) — the same
-  pause Wispr has. Worth it for correctness.
-- **Fallback:** if the Whisper model file isn't present yet (first run, still
-  downloading), fall back to the existing Apple recognizer so the app always works.
+**Layer 2 — AI cleanup ("fix my English").** Pass the raw transcript through the
+existing `CleanupPipeline` → `LLMCleanupProvider` (Claude, model `claude-haiku-4-5`
+by default) with a prompt that fixes grammar, filler, and phrasing **without
+changing meaning and without adding content**. Per-mode (email vs chat vs code vs
+raw). Default-on when an API key is set; deterministic local cleanup otherwise.
+Never auto-send.
 
 ## Components
 
-- `WhisperModelStore` — locates/downloads/validates the ggml model in Application
-  Support; exposes readiness. First run: prompt + background download with progress.
-- `WhisperTranscriber : Transcribing` — wraps `whisper.cpp`; takes an
-  `AudioCapture` (16 kHz mono) and returns `TranscriptionResult`. Runs off the main
-  actor; bounded by a timeout.
-- `RecordingAudioCapture : AudioRecording` — taps the mic, resamples to 16 kHz
-  mono, accumulates samples, reports live level for the pill. Replaces the
-  streaming role of `LiveSpeechDictation`.
-- Coordinator wiring: choose `WhisperTranscriber` when the model is ready, else the
-  Apple transcriber. Vocabulary → Whisper `initial_prompt` for name/term bias.
-- Keep the destination-guarded **paste-into-focused-field** insertion unchanged
-  (already correct, Wispr's method).
-
-## Data flow
-
-hold key → `RecordingAudioCapture` accumulates 16 kHz mono → release →
-`AudioCapture` → `WhisperTranscriber.transcribe` (full-context) → cleanup →
-destination guard → paste. Pill: `recording` (waveform) → `processing` → done.
+- `SpeechAnalyzerTranscriber : Transcribing` — new; wraps `SpeechAnalyzer`.
+  Uses `AssetInventory.reserve(locale:)` + `assetInstallationRequest` to ensure the
+  model asset is installed (one-time), gates on `SpeechTranscriber.isAvailable` and
+  `supportedLocales`.
+- `RecordingAudioCapture : AudioRecording` — taps mic, accumulates buffers, reports
+  live level for the pill. (Split capture from recognition.)
+- Coordinator: prefer `SpeechAnalyzerTranscriber` on macOS 26 when available; fall
+  back to the current live engine otherwise, so the app always works.
+- Cleanup: make LLM cleanup robust + default; strong "fix grammar, keep meaning"
+  prompt; graceful offline fallback.
+- Insertion unchanged (paste into focused field — already correct).
 
 ## Error handling
 
-- Model missing/corrupt → Apple fallback + a one-time notice to finish setup.
-- Transcription timeout (e.g. > 20 s) → return best-effort text or copy to clipboard.
-- Empty/near-silent capture → no-op with a gentle pill message.
-- Never lose text: always write to history + clipboard even if insertion fails.
+- Model/asset not ready → fall back to Apple legacy engine + one-time setup notice.
+- Transcription/finalize timeout → best-effort text or copy to clipboard.
+- Cleanup failure/offline → return the raw transcript (never block insertion).
+- Never lose text: always store to history + clipboard.
 
 ## Testing
 
-- `VoiceFlowTestKit`: unit-test `WhisperModelStore` state machine (missing →
-  downloading → ready → corrupt), transcriber selection logic, and audio
-  accumulation/resampling math with synthetic buffers. Whisper inference itself is
-  validated manually with a known clip (fixture) since it needs the model.
+`VoiceFlowTestKit`: transcriber-selection logic, availability/asset state machine,
+audio accumulation math (synthetic buffers), cleanup-prompt shaping. Live inference
+validated manually against a known phrase.
 
-## Later phases (tracked, not this spec)
+## Full roadmap (Wispr parity) — tracked
 
-2. Reliability: onboarding permission check for all 4 grants; graceful no-field.
-3. Wispr-parity features: AI formatting per app, dictionary UI, snippets, stats.
-4. Polish: modernize main window; onboarding.
+- **Phase 1 (this spec):** SpeechAnalyzer engine + AI cleanup. ← accuracy + English.
+- **Phase 2 Reliability:** onboarding that verifies all 4 permissions; graceful
+  no-field; never-lose-text.
+- **Phase 3 Features:** AI formatting/tone per app; custom dictionary UI; snippets /
+  text-expansion; usage stats; optional command mode.
+- **Phase 4 Polish:** modernize main window to match the pill; onboarding flow.
 
 ## Non-goals
 
-No cloud transcription; no auto-send ever (newlines→spaces on any type fallback).
+No cloud transcription (audio stays on device). Never auto-send (newlines→spaces on
+any typing fallback). No feature that sends text anywhere the user didn't target.
