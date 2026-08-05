@@ -61,19 +61,20 @@ final class OverlayController {
     private func ensurePanel() -> NSPanel {
         if let panel { return panel }
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 168, height: 44),
+            contentRect: NSRect(x: 0, y: 0, width: 176, height: 60),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered, defer: false
         )
         panel.isFloatingPanel = true
         panel.level = .statusBar
-        panel.hasShadow = true
+        panel.hasShadow = false   // SwiftUI draws the pill's shadow; the window
+                                  // shadow drew a second grainy outline ("2 pills")
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
         panel.ignoresMouseEvents = true
         let hosting = NSHostingView(rootView: OverlayView(model: model))
-        hosting.frame = NSRect(x: 0, y: 0, width: 168, height: 44)
+        hosting.frame = NSRect(x: 0, y: 0, width: 176, height: 60)
         panel.contentView = hosting
         self.panel = panel
         return panel

@@ -30,9 +30,9 @@ struct OverlayView: View {
                 LinearGradient(colors: [.white.opacity(0.22), .white.opacity(0.05)],
                                startPoint: .top, endPoint: .bottom), lineWidth: 0.75)
         )
-        .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
+        .shadow(color: .black.opacity(0.3), radius: 9, y: 3)
         .fixedSize()
-        .frame(width: 168, height: 44)
+        .frame(width: 176, height: 60)
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: titleText)
     }
 
