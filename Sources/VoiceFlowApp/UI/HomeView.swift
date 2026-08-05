@@ -89,38 +89,48 @@ struct HomeView: View {
 
     // MARK: - Talk button (tap to start/stop; hotkey is hold-to-talk)
 
+    private static let recordGradient = LinearGradient(
+        colors: [Color(red: 1.0, green: 0.38, blue: 0.42), Color(red: 0.92, green: 0.22, blue: 0.45)],
+        startPoint: .topLeading, endPoint: .bottomTrailing)
+
     private var talkButton: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 14) {
             ZStack {
-                // Static ring while recording (visual affordance).
+                // Live glow ring that breathes with the mic level while recording.
                 if coordinator.isRecording {
-                    Circle().stroke(Color.red.opacity(0.25), lineWidth: 2)
-                        .scaleEffect(1.14)
+                    Circle()
+                        .fill(Self.recordGradient)
+                        .frame(width: 150, height: 150)
+                        .scaleEffect(1 + 0.16 * min(1, coordinator.audioLevel))
+                        .opacity(0.22)
+                        .blur(radius: 14)
+                        .animation(.easeOut(duration: 0.12), value: coordinator.audioLevel)
                 }
                 // Tap-to-toggle button: tap to start, tap again to stop.
                 Button(action: { coordinator.toggleRecording() }) {
                     ZStack {
                         Circle()
-                            .fill(coordinator.isRecording ? AnyShapeStyle(Color.red) : AnyShapeStyle(Self.brand))
-                            .frame(width: 132, height: 132)
-                            .shadow(color: (coordinator.isRecording ? Color.red : Color.blue).opacity(0.35), radius: 18, y: 8)
+                            .fill(coordinator.isRecording ? AnyShapeStyle(Self.recordGradient) : AnyShapeStyle(Self.brand))
+                            .frame(width: 128, height: 128)
+                            .overlay(Circle().strokeBorder(.white.opacity(0.18), lineWidth: 1))
+                            .shadow(color: (coordinator.isRecording ? Color(red: 0.95, green: 0.25, blue: 0.4) : Color(red: 0.42, green: 0.45, blue: 0.98)).opacity(0.5), radius: 24, y: 12)
                         Image(systemName: coordinator.isRecording ? "stop.fill" : "mic.fill")
-                            .font(.system(size: 44, weight: .semibold))
+                            .font(.system(size: 40, weight: .bold))
                             .foregroundStyle(.white)
-                            .symbolEffect(.variableColor.iterative, isActive: coordinator.isRecording)
                     }
                     .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .scaleEffect(coordinator.isRecording ? 1.04 : 1)
-                .animation(.spring(response: 0.3, dampingFraction: 0.6), value: coordinator.isRecording)
+                .scaleEffect(coordinator.isRecording ? 1.03 : 1)
+                .animation(.spring(response: 0.3, dampingFraction: 0.65), value: coordinator.isRecording)
             }
-            .frame(height: 160)
+            .frame(height: 168)
 
             Text(coordinator.isRecording
                  ? "Recording… tap to stop"
                  : "Tap to start  ·  or hold \(coordinator.settings.hotkey.displayString)")
-                .font(.callout).foregroundStyle(coordinator.isRecording ? .red : .secondary)
+                .font(.callout.weight(.medium))
+                .foregroundStyle(coordinator.isRecording ? Color(red: 0.9, green: 0.25, blue: 0.4) : .secondary)
         }
     }
 

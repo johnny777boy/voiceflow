@@ -118,14 +118,27 @@ final class LiveSpeechDictation: AudioRecording, Transcribing, @unchecked Sendab
 
     // MARK: - Segment management
 
+    /// When true, force Apple's on-device recognizer (private, offline, but less
+    /// accurate). When false (default), allow Apple's server model when online —
+    /// materially better word accuracy, closer to Wispr.
+    var forceOnDevice = false
+
     private func newRequest() -> SFSpeechAudioBufferRecognitionRequest {
         let r = SFSpeechAudioBufferRecognitionRequest()
         r.shouldReportPartialResults = true
         r.taskHint = .dictation
         r.addsPunctuation = true   // periods, commas, question marks from the recognizer
-        if recognizer?.supportsOnDeviceRecognition == true { r.requiresOnDeviceRecognition = true }
+        // Only force on-device if explicitly requested; otherwise let the system
+        // use the more accurate server model when a network is available.
+        if forceOnDevice, recognizer?.supportsOnDeviceRecognition == true {
+            r.requiresOnDeviceRecognition = true
+        }
+        if !contextualStrings.isEmpty { r.contextualStrings = contextualStrings }
         return r
     }
+
+    /// Names / jargon to bias recognition toward (from the user's vocabulary).
+    var contextualStrings: [String] = []
 
     private func startSegment() {
         guard let recognizer else { return }
