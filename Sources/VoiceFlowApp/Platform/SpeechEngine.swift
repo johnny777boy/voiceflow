@@ -9,4 +9,10 @@ protocol SpeechEngine: AudioRecording, Transcribing, AnyObject {
     var preferredLanguage: String { get set }
     var levelHandler: (@Sendable (Float) -> Void)? { get set }
     var contextualStrings: [String] { get set }
+    /// Optionally warm the mic so the first word isn't clipped. Default: no-op.
+    func prewarm()
+}
+
+extension SpeechEngine {
+    func prewarm() {}
 }

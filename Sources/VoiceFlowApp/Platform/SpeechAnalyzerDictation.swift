@@ -18,10 +18,14 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
     var levelHandler: (@Sendable (Float) -> Void)?
     var contextualStrings: [String] = []
 
-    private var engine: AVAudioEngine?
+    private var engine: AVAudioEngine?           // long-lived, kept warm
     private let lock = NSLock()
     private var audioFile: AVAudioFile?
     private var fileURL: URL?
+    private var tapFormat: AVAudioFormat?
+    private var recording = false                // whether the tap writes to the file
+    private var preroll: [AVAudioPCMBuffer] = []  // ~0.5s ring buffer captured BEFORE keypress
+    private var prerollFrameLimit: AVAudioFrameCount = 24_000
     private(set) var isRecording = false
 
     static func isSupported(language: String) async -> Bool {
@@ -46,42 +50,74 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
         return try DispatchQueue.main.sync { Result(catching: body) }.get()
     }
 
+    /// Start the mic engine and keep it WARM with a permanent tap that continuously
+    /// fills a short pre-roll ring buffer. Idempotent. Call at app launch so the mic
+    /// is already listening when the user presses the key — this is what stops the
+    /// first word ("So how come…") from being clipped by mic warm-up.
+    func prewarm() { try? onMain { try self.startEngineIfNeeded() } }
+
+    private func startEngineIfNeeded() throws {
+        if engine != nil { return }
+        let engine = AVAudioEngine()
+        let input = engine.inputNode
+        let hw = input.inputFormat(forBus: 0)
+        guard hw.channelCount > 0, hw.sampleRate > 0 else {
+            throw VoiceFlowError.audioEngineFailure("Microphone reported no input — check Microphone permission.")
+        }
+        let fmt = input.outputFormat(forBus: 0)
+        self.tapFormat = fmt
+        self.prerollFrameLimit = AVAudioFrameCount(max(8_000, fmt.sampleRate * 0.5))  // ~0.5s
+        Log.transcription.notice("SA engine warm: rate=\(fmt.sampleRate) ch=\(fmt.channelCount)")
+
+        input.installTap(onBus: 0, bufferSize: 1024, format: fmt) { [weak self] buffer, _ in
+            self?.handleTap(buffer)
+        }
+        engine.prepare()
+        try engine.start()
+        self.engine = engine
+    }
+
+    /// Runs on the audio render thread. While recording, write live to the file.
+    /// While idle, keep the most recent ~0.5s in the ring buffer as pre-roll.
+    private func handleTap(_ buffer: AVAudioPCMBuffer) {
+        lock.lock()
+        if recording {
+            try? audioFile?.write(from: buffer)
+        } else if let copy = Self.copy(buffer) {
+            preroll.append(copy)
+            var total: AVAudioFrameCount = preroll.reduce(0) { $0 + $1.frameLength }
+            while total > prerollFrameLimit, preroll.count > 1 {
+                total -= preroll.removeFirst().frameLength
+            }
+        }
+        lock.unlock()
+        if let h = levelHandler { h(Self.level(of: buffer)) }
+    }
+
     func startRecording() throws { try onMain { try self.startRecordingImpl() } }
 
     private func startRecordingImpl() throws {
-        let engine = AVAudioEngine()
-        self.engine = engine
-        let input = engine.inputNode
-        let hw = input.inputFormat(forBus: 0)
-        Log.transcription.notice("SA capture start: hw rate=\(hw.sampleRate) ch=\(hw.channelCount)")
-        guard hw.channelCount > 0, hw.sampleRate > 0 else {
-            self.engine = nil
-            throw VoiceFlowError.audioEngineFailure("Microphone reported no input — check Microphone permission.")
+        try startEngineIfNeeded()   // warm already, unless this is the very first use
+        guard let fmt = tapFormat else {
+            throw VoiceFlowError.audioEngineFailure("Audio not ready.")
         }
-        let tapFormat = input.outputFormat(forBus: 0)
-
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("voiceflow-\(UUID().uuidString).caf")
         let file: AVAudioFile
         do {
-            file = try AVAudioFile(forWriting: url, settings: tapFormat.settings)
+            file = try AVAudioFile(forWriting: url, settings: fmt.settings)
         } catch {
-            self.engine = nil
             throw VoiceFlowError.audioEngineFailure("Could not open capture file: \(error.localizedDescription)")
         }
-        lock.lock(); self.audioFile = file; self.fileURL = url; lock.unlock()
-
-        input.installTap(onBus: 0, bufferSize: 1024, format: tapFormat) { [weak self] buffer, _ in
-            guard let self else { return }
-            self.lock.lock(); try? self.audioFile?.write(from: buffer); self.lock.unlock()
-            if let h = self.levelHandler { h(Self.level(of: buffer)) }
-        }
-
-        engine.prepare()
-        do { try engine.start() } catch {
-            input.removeTap(onBus: 0); self.engine = nil
-            throw VoiceFlowError.audioEngineFailure(error.localizedDescription)
-        }
+        lock.lock()
+        self.audioFile = file
+        self.fileURL = url
+        // Write the pre-roll (the ~0.5s captured just BEFORE the keypress) first, so
+        // the opening word is already in the file. Then go live.
+        for buf in preroll { try? file.write(from: buf) }
+        preroll.removeAll(keepingCapacity: true)
+        recording = true
+        lock.unlock()
         isRecording = true
     }
 
@@ -90,15 +126,15 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
     private func stopRecordingImpl() throws -> AudioCapture {
         guard isRecording else { return AudioCapture(samples: [], sampleRate: 16_000, duration: 0) }
         isRecording = false
-        // Drain: the tap runs on the audio render thread, so this brief pause lets it
-        // capture the trailing audio (the last word) that would otherwise be lost when
-        // we tear the engine down the instant the key is released. Then stop the engine,
-        // remove the tap, and close the file LAST so those final buffers are written.
+        // Drain: keep writing for a beat so the trailing audio (the last word) is
+        // captured before we stop writing. The engine stays WARM for next time.
         Thread.sleep(forTimeInterval: 0.18)
-        engine?.stop()
-        engine?.inputNode.removeTap(onBus: 0)
-        engine = nil
-        lock.lock(); self.audioFile = nil; lock.unlock()   // closes/flushes the file after the last writes
+        lock.lock()
+        recording = false
+        let file = audioFile
+        audioFile = nil        // releasing the AVAudioFile flushes + closes it
+        lock.unlock()
+        _ = file
         levelHandler?(0)
         return AudioCapture(samples: [], sampleRate: 16_000, duration: 0)
     }
@@ -179,6 +215,23 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
     }
 
     // MARK: - Level metering
+
+    /// Deep-copy a tap buffer (the tap reuses its buffer) for the pre-roll ring.
+    private static func copy(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        guard let out = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: buffer.frameLength) else { return nil }
+        out.frameLength = buffer.frameLength
+        let channels = Int(buffer.format.channelCount)
+        let frames = Int(buffer.frameLength)
+        if let src = buffer.floatChannelData, let dst = out.floatChannelData {
+            for ch in 0..<channels { memcpy(dst[ch], src[ch], frames * MemoryLayout<Float>.size) }
+            return out
+        }
+        if let src = buffer.int16ChannelData, let dst = out.int16ChannelData {
+            for ch in 0..<channels { memcpy(dst[ch], src[ch], frames * MemoryLayout<Int16>.size) }
+            return out
+        }
+        return nil
+    }
 
     private static func level(of buffer: AVAudioPCMBuffer) -> Float {
         guard let ch = buffer.floatChannelData else { return 0 }

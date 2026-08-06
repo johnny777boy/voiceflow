@@ -145,6 +145,8 @@ final class AppCoordinator: ObservableObject {
         microphoneGranted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
         speechGranted = SFSpeechRecognizer.authorizationStatus() == .authorized
         inputMonitoringGranted = InputMonitoring.isGranted()
+        // Keep the mic warm so the first word isn't clipped by device warm-up.
+        if microphoneGranted, !isRecording { live.prewarm() }
     }
 
     private func requestPermissions() async {
