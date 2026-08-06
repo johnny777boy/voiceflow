@@ -61,12 +61,16 @@ final class AppCoordinator: ObservableObject {
         // key) on macOS 26; otherwise the optional Anthropic provider (needs a key).
         let llmProvider: CleanupProviding
         let useLLM: Bool
-        if #available(macOS 26.0, *), FoundationModelsCleanupProvider.isAvailable {
-            // On-device, free, private — this is the "think, then deliver" polish
-            // step (like Wispr). Always run it; it isn't gated by the paid-API toggle.
+        if #available(macOS 26.0, *) {
+            // On-device, free, private — the "think, then deliver" polish (like Wispr).
+            // Do NOT gate on isAvailable HERE: that value is a moving target (false while
+            // Apple Intelligence is still waking up at launch), and freezing it once left
+            // cleanup/punctuation off for a whole session. The provider re-checks
+            // availability on EVERY call and falls back to rule-based only when it's
+            // genuinely not ready — so cleanup turns on the moment the model is ready.
             llmProvider = FoundationModelsCleanupProvider()
             useLLM = true
-            Log.cleanup.notice("cleanup: on-device Foundation Models (always on)")
+            Log.cleanup.notice("cleanup: on-device Foundation Models (re-checked per call)")
         } else {
             // Paid Anthropic API — respect the user's toggle + key.
             llmProvider = LLMCleanupProvider(secureStore: secureStore)

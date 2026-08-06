@@ -171,6 +171,14 @@ func runCleanupTests(_ s: TestSuite) {
         s.expect(!CleanupGuard.preservesMeaning(original: "please schedule the meeting for tomorrow afternoon", cleaned: "OK."),
                  "gut rejected")
     }
+
+    s.test("Auto mode picks the best mode per app") { s in
+        s.expectEqual(AppSettings.autoMode(forBundleIdentifier: "com.apple.Terminal"), .claudeCode)
+        s.expectEqual(AppSettings.autoMode(forBundleIdentifier: "com.microsoft.VSCode"), .claudeCode)
+        s.expectEqual(AppSettings.autoMode(forBundleIdentifier: "com.apple.mail"), .email)
+        s.expectEqual(AppSettings.autoMode(forBundleIdentifier: "com.tinyspeck.slackmacgap"), .cleanWriting)
+        s.expectEqual(AppSettings.autoMode(forBundleIdentifier: "com.apple.Notes"), .cleanWriting)
+    }
 }
 
 private struct FailingLLM: CleanupProviding {
@@ -183,3 +191,4 @@ private struct FixedLLM: CleanupProviding {
     let output: String
     func clean(_ rawText: String, context: CleanupContext) async throws -> String { output }
 }
+

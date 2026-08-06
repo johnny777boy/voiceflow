@@ -68,6 +68,11 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
         self.tapFormat = fmt
         self.prerollFrameLimit = AVAudioFrameCount(max(8_000, fmt.sampleRate * 0.5))  // ~0.5s
         Log.transcription.notice("SA engine warm: rate=\(fmt.sampleRate) ch=\(fmt.channelCount)")
+        // Diagnose the "bad transcript" class that's usually environmental: a
+        // Bluetooth/headset mic runs at ≤16 kHz and materially hurts accuracy.
+        if fmt.sampleRate <= 16_000 {
+            Log.transcription.notice("SA WARNING: low input rate \(fmt.sampleRate) Hz — a Bluetooth/headset mic degrades accuracy; prefer the built-in mic.")
+        }
 
         input.installTap(onBus: 0, bufferSize: 1024, format: fmt) { [weak self] buffer, _ in
             self?.handleTap(buffer)
@@ -162,8 +167,8 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
         let transcriber = SpeechTranscriber(
             locale: locale,
             transcriptionOptions: [],
-            reportingOptions: [],
-            attributeOptions: []
+            reportingOptions: [.alternativeTranscriptions],  // populate n-best; still NO volatile
+            attributeOptions: [.transcriptionConfidence]     // per-run confidence for re-ranking
         )
         let analyzer = SpeechAnalyzer(modules: [transcriber])
 
@@ -175,13 +180,18 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
             context.contextualStrings = [.general: terms]
             try? await analyzer.setContext(context)
         }
+        let vocab = Self.vocabTokens(from: terms)
 
         // Start consuming results BEFORE feeding audio so no early segment is lost.
         // Accumulate only final segments, in time order, joined with single spaces.
+        // Each segment keeps the model's top-1 UNLESS an alternative contains strictly
+        // more of the user's vocabulary (fixes homophones/jargon; never degrades
+        // general text, where all candidates tie at 0 vocab hits).
         let resultsTask = Task { () throws -> String in
             var pieces: [String] = []
             for try await result in transcriber.results where result.isFinal {
-                let piece = String(result.text.characters).trimmingCharacters(in: .whitespacesAndNewlines)
+                let best = Self.bestCandidate(result, vocab: vocab)
+                let piece = best.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !piece.isEmpty { pieces.append(piece) }
             }
             return pieces.joined(separator: " ")
@@ -215,6 +225,46 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
     }
 
     // MARK: - Level metering
+
+    // MARK: - Vocabulary-aware re-ranking of the n-best list
+
+    private static func vocabTokens(from terms: [String]) -> Set<String> {
+        var set = Set<String>()
+        for t in terms {
+            for w in t.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }) where w.count > 1 {
+                set.insert(String(w))
+            }
+        }
+        return set
+    }
+
+    /// Start from the model's top-1 and only switch to an alternative that contains
+    /// STRICTLY more of the user's vocabulary (ties broken by higher confidence). When
+    /// all candidates tie at 0 vocab hits (the common case) top-1 is kept unchanged.
+    private static func bestCandidate(_ result: SpeechTranscriber.Result, vocab: Set<String>) -> String {
+        let top = result.text
+        guard !vocab.isEmpty, !result.alternatives.isEmpty else { return String(top.characters) }
+        func vocabHits(_ s: AttributedString) -> Int {
+            var hits = 0
+            for w in String(s.characters).lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+            where vocab.contains(String(w)) { hits += 1 }
+            return hits
+        }
+        func avgConfidence(_ s: AttributedString) -> Double {
+            var sum = 0.0, n = 0.0
+            for run in s.runs { if let c = run.transcriptionConfidence { sum += Double(c); n += 1 } }
+            return n > 0 ? sum / n : 0
+        }
+        let topHits = vocabHits(top)
+        var bestText = top, bestHits = topHits, bestConf = avgConfidence(top)
+        for alt in result.alternatives {
+            let h = vocabHits(alt)
+            if h > bestHits || (h == bestHits && h > topHits && avgConfidence(alt) > bestConf) {
+                bestText = alt; bestHits = h; bestConf = avgConfidence(alt)
+            }
+        }
+        return String(bestText.characters)
+    }
 
     /// Deep-copy a tap buffer (the tap reuses its buffer) for the pre-roll ring.
     private static func copy(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
