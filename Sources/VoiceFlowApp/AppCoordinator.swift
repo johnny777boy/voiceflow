@@ -134,8 +134,12 @@ final class AppCoordinator: ObservableObject {
         // Feed the live mic level into the floating waveform pill AND the window.
         live.levelHandler = { [weak self] level in
             Task { @MainActor in
-                self?.overlay.updateLevel(level)
-                self?.audioLevel = CGFloat(level)
+                guard let self else { return }
+                self.overlay.updateLevel(level)
+                // Coalesce: only publish visible changes — every publish re-renders
+                // every window observing the coordinator.
+                let new = CGFloat(level)
+                if abs(new - self.audioLevel) > 0.01 { self.audioLevel = new }
             }
         }
         // Bias recognition toward the user's saved names/terms.

@@ -86,7 +86,8 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
     /// While idle, keep the most recent ~0.5s in the ring buffer as pre-roll.
     private func handleTap(_ buffer: AVAudioPCMBuffer) {
         lock.lock()
-        if recording {
+        let isRecording = recording
+        if isRecording {
             try? audioFile?.write(from: buffer)
         } else if let copy = Self.copy(buffer) {
             preroll.append(copy)
@@ -96,7 +97,12 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
             }
         }
         lock.unlock()
-        if let h = levelHandler { h(Self.level(of: buffer)) }
+        // Report the mic level ONLY while recording. The engine stays warm 24/7
+        // (pre-roll), so an unconditional callback here published ~50 UI updates
+        // per second forever — enough continuous SwiftUI layout work to pin the
+        // main thread at 100% CPU and jank the whole app (scrolling, overlay).
+        // `stopRecordingImpl` still sends the final 0 to reset the waveform.
+        if isRecording, let h = levelHandler { h(Self.level(of: buffer)) }
     }
 
     func startRecording() throws { try onMain { try self.startRecordingImpl() } }
