@@ -66,7 +66,7 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
         }
         let fmt = input.outputFormat(forBus: 0)
         self.tapFormat = fmt
-        self.prerollFrameLimit = AVAudioFrameCount(max(8_000, fmt.sampleRate * 0.5))  // ~0.5s
+        self.prerollFrameLimit = AVAudioFrameCount(max(8_000, fmt.sampleRate * 0.8))  // ~0.8s lead-in
         Log.transcription.notice("SA engine warm: rate=\(fmt.sampleRate) ch=\(fmt.channelCount)")
         // Diagnose the "bad transcript" class that's usually environmental: a
         // Bluetooth/headset mic runs at ≤16 kHz and materially hurts accuracy.
@@ -118,13 +118,17 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
         if let stale = self.fileURL { try? FileManager.default.removeItem(at: stale) }  // never accumulate
         self.audioFile = file
         self.fileURL = url
-        // Write the pre-roll (the ~0.5s captured just BEFORE the keypress) first, so
+        // Write the pre-roll (the ~0.8s captured just BEFORE the keypress) first, so
         // the opening word is already in the file. Then go live.
+        let prerollFrames = preroll.reduce(0) { $0 + Int($1.frameLength) }
         for buf in preroll { try? file.write(from: buf) }
         preroll.removeAll(keepingCapacity: true)
         recording = true
         lock.unlock()
         isRecording = true
+        // Diagnostic: warm=true + a non-zero pre-roll means the opening audio IS being
+        // captured (so any first-word error is recognition, not clipping).
+        Log.transcription.notice("SA record: warm=\(self.engine != nil, privacy: .public) prerollFrames=\(prerollFrames, privacy: .public)")
     }
 
     func stopRecording() throws -> AudioCapture { try onMain { try self.stopRecordingImpl() } }

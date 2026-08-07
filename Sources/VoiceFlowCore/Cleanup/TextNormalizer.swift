@@ -95,6 +95,18 @@ public enum TextNormalizer {
         return trimmed
     }
 
+    /// Strip a meta preamble a small LLM sometimes prepends despite instructions
+    /// ("Here is the cleaned text:", "Sure, here's the corrected version:", "Cleaned
+    /// text:"). Only matches when a cleaning keyword (cleaned/corrected/…) is present,
+    /// so genuine content like "Here is the plan:" is left untouched.
+    public static func stripLLMPreamble(_ text: String) -> String {
+        let pattern = "^\\s*(sure[,.]?\\s+)?(here'?s?\\s+(is\\s+)?)?(the\\s+)?(cleaned|corrected|polished|revised|edited)([ -]?up)?\\s+(text|version|transcript|sentence)\\s*:\\s*"
+        if let r = text.range(of: pattern, options: [.regularExpression, .caseInsensitive]) {
+            return String(text[r.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return text
+    }
+
     /// Final prose tidy: collapse doubled sentence punctuation ("it.. our" → "it. our"),
     /// repeated commas, and stray spaces before punctuation — artifacts that appear
     /// when speech segments are stitched together or the LLM leaves a seam. Then
