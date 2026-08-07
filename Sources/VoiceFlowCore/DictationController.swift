@@ -73,6 +73,7 @@ public actor DictationController {
     /// Cancel an in-progress recording without transcribing or inserting.
     public func cancelRecording() {
         _ = try? audio.stopRecording()
+        audio.discardPendingCapture()   // remove the temp capture file we won't transcribe
         pendingSnapshot = nil
     }
 

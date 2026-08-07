@@ -27,4 +27,11 @@ public protocol AudioRecording: AnyObject, Sendable {
     func stopRecording() throws -> AudioCapture
     /// Request microphone authorization; returns whether granted.
     func requestPermission() async -> Bool
+    /// Discard any capture buffered by the last `stopRecording()` that will NOT be
+    /// transcribed (cancel / short-hold), releasing temp resources. Default: no-op.
+    func discardPendingCapture()
+}
+
+public extension AudioRecording {
+    func discardPendingCapture() {}
 }
