@@ -92,9 +92,20 @@ final class AppCoordinator: ObservableObject {
         engine.preferredLanguage = loaded.languageCode
         let live = engine
         self.live = live
+        // Transcriber: default is the fast on-device Apple engine. When the user
+        // turns on "High Accuracy", use on-device Whisper (WhisperKit) instead — the
+        // recorder (live) still captures audio to a file and passes it via
+        // AudioCapture.fileURL. Toggled via UserDefaults so no settings migration.
+        let transcriber: Transcribing
+        if UserDefaults.standard.bool(forKey: "useWhisperEngine"), #available(macOS 14.0, *) {
+            transcriber = WhisperKitTranscriber()
+            Log.transcription.notice("transcriber: WhisperKit (high accuracy)")
+        } else {
+            transcriber = live
+        }
         self.controller = DictationController(
             audio: live,
-            transcriber: live,
+            transcriber: transcriber,
             cleanup: pipeline,
             inserter: AccessibilityTextInserter(),
             activeApp: WorkspaceActiveAppProvider(),

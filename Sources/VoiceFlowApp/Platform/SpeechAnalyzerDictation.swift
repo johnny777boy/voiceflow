@@ -146,7 +146,9 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
         lock.unlock()
         _ = file
         levelHandler?(0)
-        return AudioCapture(samples: [], sampleRate: 16_000, duration: 0)
+        // Expose the recorded file so a file-based transcriber (WhisperKit) can read
+        // it; SpeechAnalyzer's own transcribe() still uses the internal fileURL.
+        return AudioCapture(samples: [], sampleRate: 16_000, duration: 0, fileURL: fileURL)
     }
 
     // MARK: - Transcription (Transcribing)

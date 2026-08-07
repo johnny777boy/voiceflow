@@ -7,6 +7,7 @@ struct SettingsView: View {
     @ObservedObject var coordinator: AppCoordinator
     @State private var draft: AppSettings
     @State private var apiKey: String = ""
+    @AppStorage("useWhisperEngine") private var useWhisper = false
 
     init(coordinator: AppCoordinator) {
         self.coordinator = coordinator
@@ -83,6 +84,10 @@ struct SettingsView: View {
 
     private var privacy: some View {
         Form {
+            Toggle("High Accuracy transcription (on-device Whisper)", isOn: $useWhisper)
+            Text("Uses on-device Whisper (large-v3-turbo) instead of Apple's engine. Better for accents/non-native English, but ~1–2s slower and downloads a model (~1 GB) on first use. Audio stays on your Mac. Relaunch VoiceFlow to apply.")
+                .font(.caption).foregroundStyle(.secondary)
+            Divider()
             Toggle("Use AI cleanup (requires API key)", isOn: $draft.useLLMCleanup)
             SecureField("Anthropic API key", text: $apiKey)
                 .onSubmit { if apiKey != "••••••••" { coordinator.setAPIKey(apiKey) } }
