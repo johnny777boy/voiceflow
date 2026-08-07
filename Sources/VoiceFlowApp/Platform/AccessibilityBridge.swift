@@ -42,6 +42,26 @@ enum AX {
         "AXTextField", "AXTextArea", "AXComboBox", "AXSearchField",
     ]
 
+    /// The character immediately before the caret in the focused field, if readable
+    /// via Accessibility. Used to decide whether a new dictation needs a leading
+    /// space so it doesn't glue onto existing text. Returns nil when unknown.
+    static func characterBeforeCaret(_ element: AXUIElement) -> Character? {
+        guard let value = string(element, kAXValueAttribute), !value.isEmpty else { return nil }
+        // Caret location from the selected-text range (AXValue wrapping a CFRange).
+        var loc = value.utf16.count   // default: assume caret at end
+        var raw: CFTypeRef?
+        if AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &raw) == .success,
+           let r = raw, CFGetTypeID(r) == AXValueGetTypeID() {
+            var range = CFRange()
+            if AXValueGetValue(r as! AXValue, .cfRange, &range) { loc = range.location }
+        }
+        guard loc > 0 else { return nil }   // caret at the very start → no preceding char
+        let utf16 = Array(value.utf16)
+        let idx = min(loc, utf16.count) - 1
+        guard idx >= 0, idx < utf16.count, let scalar = Unicode.Scalar(utf16[idx]) else { return nil }
+        return Character(scalar)
+    }
+
     /// Whether an element is an editable text destination: either it exposes a
     /// settable value/selection, or it reports a known text-entry role. This is
     /// how we tell "the caret is in a text box" from "the user is just looking at
