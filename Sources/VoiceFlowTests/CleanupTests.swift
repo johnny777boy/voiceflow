@@ -2,16 +2,20 @@ import Foundation
 import VoiceFlowCore
 import VoiceFlowTestKit
 
-private func ctx(_ mode: DictationMode, _ strength: CleanupStrength = .standard) -> CleanupContext {
-    CleanupContext(mode: mode, strength: strength, vocabulary: VocabularyEntry.defaults, languageCode: "en-US")
+private func ctx(_ mode: DictationMode, _ strength: CleanupStrength = .standard,
+                 spokenPunctuation: Bool = false) -> CleanupContext {
+    CleanupContext(mode: mode, strength: strength, vocabulary: VocabularyEntry.defaults,
+                   languageCode: "en-US", spokenPunctuationEnabled: spokenPunctuation)
 }
 
 func runCleanupTests(_ s: TestSuite) {
     let engine = RuleBasedCleanup()
 
-    s.test("Raw mode only normalizes whitespace and vocabulary") { s in
+    s.test("Raw mode is verbatim: whitespace only, no vocabulary substitution") { s in
+        // POLICY CHANGE (verbatim-fidelity): Raw must deliver the exact words
+        // spoken — vocabulary rewriting corrupted WER benchmarks run in Raw.
         let out = engine.cleanSync("i   use    postgres", context: ctx(.raw))
-        s.expectEqual(out, "i use PostgreSQL")
+        s.expectEqual(out, "i use postgres")
     }
 
     s.test("Raw mode does not add punctuation or capitalize") { s in
@@ -37,9 +41,13 @@ func runCleanupTests(_ s: TestSuite) {
         s.expect(out.lowercased().contains("kind of"), "kept 'kind of': \(out)")
     }
 
-    s.test("Clean writing converts spoken punctuation") { s in
-        let out = engine.cleanSync("hello there comma how are you question mark", context: ctx(.cleanWriting))
-        s.expectEqual(out, "Hello there, how are you?")
+    s.test("Clean writing converts spoken punctuation ONLY when opted in") { s in
+        let optIn = engine.cleanSync("hello there comma how are you question mark",
+                                     context: ctx(.cleanWriting, spokenPunctuation: true))
+        s.expectEqual(optIn, "Hello there, how are you?")
+        // Default: the words survive — "comma" said as a word is kept.
+        let def = engine.cleanSync("hello there comma how are you question mark", context: ctx(.cleanWriting))
+        s.expect(def.lowercased().contains("comma"), "default keeps the literal word: \(def)")
     }
 
     s.test("Code mode preserves commands without trailing period") { s in
@@ -87,7 +95,7 @@ func runCleanupTests(_ s: TestSuite) {
     s.test("Pipeline skips LLM in raw mode") { s in
         let pipeline = CleanupPipeline(llmProvider: FixedLLM(output: "REFINED"), useLLM: true)
         let result = blockingAwait { (try? await pipeline.clean("hello postgres", context: ctx(.raw))) ?? "ERR" }
-        s.expectEqual(result, "hello PostgreSQL")
+        s.expectEqual(result, "hello postgres")   // verbatim: no vocab, no LLM
     }
 
     s.test("Pipeline ignores empty LLM output and keeps rule result") { s in
@@ -120,8 +128,9 @@ func runCleanupTests(_ s: TestSuite) {
                  "kept 'i mean'")
     }
 
-    s.test("Real spoken punctuation still converts") { s in
-        s.expectEqual(engine.cleanSync("wait comma stop", context: ctx(.cleanWriting)), "Wait, stop.")
+    s.test("Real spoken punctuation still converts when opted in") { s in
+        s.expectEqual(engine.cleanSync("wait comma stop", context: ctx(.cleanWriting, spokenPunctuation: true)),
+                      "Wait, stop.")
     }
 
     s.test("stripLLMPreamble removes leaked 'Here is the cleaned text:' prefixes") { s in
@@ -159,12 +168,19 @@ func runCleanupTests(_ s: TestSuite) {
                  "'do not' -> \"don't\" preserved")
     }
 
-    s.test("Guard ACCEPTS a heavy non-native grammar rewrite") { s in
-        // Codex's false-positive case must now pass.
+    s.test("Guard accepts morphological grammar fixes but rejects word swaps") { s in
+        // POLICY CHANGE (2026-08-07, verbatim-fidelity): stem-preserving grammar
+        // fixes pass; substituting a different word ("problematic" → "issue") is
+        // now REJECTED — the user demanded exact-words output, and a synonym swap
+        // is indistinguishable from a homophone error ("pill" → "peel").
         s.expect(CleanupGuard.preservesMeaning(
             original: "I am interesting for discuss this problematic with your recommend tomorrow",
+            cleaned: "I am interested in discussing this problematic with your recommendation tomorrow."),
+                 "stem-preserving rewrite accepted")
+        s.expect(!CleanupGuard.preservesMeaning(
+            original: "I am interesting for discuss this problematic with your recommend tomorrow",
             cleaned: "I am interested in discussing this issue with your recommendation tomorrow."),
-                 "legit rewrite accepted")
+                 "synonym substitution rejected under verbatim policy")
     }
 
     s.test("Guard REJECTS a changed number") { s in

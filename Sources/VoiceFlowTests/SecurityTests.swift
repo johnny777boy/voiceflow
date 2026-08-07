@@ -71,10 +71,13 @@ func runSecurityTests(_ s: TestSuite) {
     s.test("LLMCleanupProvider calls transport with key and returns output") { s in
         let store = InMemorySecureStore()
         try store.setSecret("sk-abc", account: KeychainStore.llmAPIKeyAccount)
-        let transport = RecordingTransport(output: "CLEANED")
+        // Output must be a safe edit of the input — the provider now runs
+        // CleanupGuard on transport output (verbatim policy), so a transcript-
+        // unrelated reply like "CLEANED" is correctly rejected.
+        let transport = RecordingTransport(output: "Raw words.")
         let provider = LLMCleanupProvider(secureStore: store, transport: transport, model: "test-model")
         let out = blockingAwait { (try? await provider.clean("raw words", context: ctx(.email))) ?? "ERR" }
-        s.expectEqual(out, "CLEANED")
+        s.expectEqual(out, "Raw words.")
         s.expectEqual(transport.box.key, "sk-abc")
         s.expectEqual(transport.box.user, "raw words")
         s.expectEqual(transport.box.model, "test-model")

@@ -19,5 +19,6 @@ runSecurityTests(suite)
 runHotkeyTests(suite)
 runControllerTests(suite)
 runFallbackTranscriberTests(suite)
+runVerbatimTests(suite)
 
 suite.finish()

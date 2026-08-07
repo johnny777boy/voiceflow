@@ -36,6 +36,9 @@ struct SettingsView: View {
             Picker("Cleanup strength", selection: $draft.cleanupStrength) {
                 ForEach(CleanupStrength.allCases, id: \.self) { Text($0.displayName).tag($0) }
             }
+            Toggle("Spoken punctuation commands", isOn: $draft.spokenPunctuationEnabled)
+            Text("Say \"period\" or \"comma\" to type . and , — off by default because it also rewrites those words when you mean them (\"during that period\" → \"during that.\").")
+                .font(.caption).foregroundStyle(.secondary)
             TextField("Language (BCP-47)", text: $draft.languageCode)
             LabeledContent("Push-to-talk hotkey", value: draft.hotkey.displayString)
             Toggle("Show recording overlay", isOn: $draft.overlayEnabled)

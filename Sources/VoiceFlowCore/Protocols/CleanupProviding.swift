@@ -6,17 +6,22 @@ public struct CleanupContext: Sendable, Equatable {
     public let strength: CleanupStrength
     public let vocabulary: [VocabularyEntry]
     public let languageCode: String
+    /// Convert spoken punctuation words ("period" → ".") — opt-in, because the
+    /// unconditional mapping destroys those words used as ordinary nouns.
+    public let spokenPunctuationEnabled: Bool
 
     public init(
         mode: DictationMode,
         strength: CleanupStrength,
         vocabulary: [VocabularyEntry],
-        languageCode: String
+        languageCode: String,
+        spokenPunctuationEnabled: Bool = false
     ) {
         self.mode = mode
         self.strength = strength
         self.vocabulary = vocabulary
         self.languageCode = languageCode
+        self.spokenPunctuationEnabled = spokenPunctuationEnabled
     }
 }
 

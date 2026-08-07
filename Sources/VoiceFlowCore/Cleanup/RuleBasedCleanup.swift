@@ -13,26 +13,32 @@ public struct RuleBasedCleanup: CleanupProviding {
     /// Synchronous entry point (the engine does no async work; exposed for tests
     /// and for callers that want the deterministic result directly).
     public func cleanSync(_ rawText: String, context: CleanupContext) -> String {
-        // 1. Vocabulary substitution always runs, even in Raw mode.
+        // Raw mode / cleanup-off are a TRUE verbatim path: whitespace tidy only.
+        // Vocabulary substitution must NOT run here — it rewrites words the user
+        // actually spoke ("postgres" → "PostgreSQL"), which corrupts both the
+        // verbatim promise and any WER benchmark run in Raw mode.
+        if context.strength == .off || context.mode == .raw {
+            return TextNormalizer.normalizeWhitespace(rawText)
+        }
+
+        // 1. Vocabulary substitution (user's spoken→written mappings).
         let replacer = VocabularyReplacer(entries: context.vocabulary)
         var text = replacer.apply(to: rawText)
 
         // 2. Whitespace normalization always runs.
         text = TextNormalizer.normalizeWhitespace(text)
 
-        if context.strength == .off || context.mode == .raw {
-            return text
-        }
-
         switch context.mode {
         case .raw:
-            return text // handled above
+            return text // unreachable (handled above)
         case .claudeCode:
             text = cleanForCode(text, strength: context.strength)
         case .cleanWriting:
-            text = cleanForProse(text, strength: context.strength, preserveLineBreaks: false)
+            text = cleanForProse(text, strength: context.strength, preserveLineBreaks: false,
+                                 spokenPunctuation: context.spokenPunctuationEnabled)
         case .email:
-            text = cleanForProse(text, strength: context.strength, preserveLineBreaks: true)
+            text = cleanForProse(text, strength: context.strength, preserveLineBreaks: true,
+                                 spokenPunctuation: context.spokenPunctuationEnabled)
         }
         return text
     }
@@ -51,11 +57,17 @@ public struct RuleBasedCleanup: CleanupProviding {
 
     /// Prose / email mode: spoken punctuation, filler removal, capitalization,
     /// terminal punctuation.
-    private func cleanForProse(_ input: String, strength: CleanupStrength, preserveLineBreaks: Bool) -> String {
+    private func cleanForProse(_ input: String, strength: CleanupStrength, preserveLineBreaks: Bool,
+                               spokenPunctuation: Bool) -> String {
         var text = input
 
         if strength == .standard || strength == .aggressive {
-            text = TextNormalizer.applySpokenPunctuation(text)
+            // Spoken-punctuation conversion is OPT-IN: unconditional word→symbol
+            // mapping destroys ordinary nouns ("during that period we met" →
+            // "during that. we met"), which reads exactly like an ASR error.
+            if spokenPunctuation {
+                text = TextNormalizer.applySpokenPunctuation(text)
+            }
             text = TextNormalizer.removeFillers(text)
         }
 

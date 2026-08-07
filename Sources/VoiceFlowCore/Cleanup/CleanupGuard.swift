@@ -29,15 +29,42 @@ public enum CleanupGuard {
         //    quantities/dates).
         if !numbers(original).isSubset(of: numbers(cleaned)) { return false }
 
-        // 4. Loose topical overlap — only to catch a total rewrite about something
+        // 4. No invented content words. A homophone swap ("pill" → "peel",
+        //    "check" → "czech") or added content ("…first thing tomorrow") passes
+        //    every check above but fabricates words the user never spoke — the
+        //    exact failure the verbatim goal forbids. A cleaned content word is
+        //    allowed only if it appeared in the original OR shares a stem with an
+        //    original word (so legitimate grammar fixes like "interesting for
+        //    discuss" → "interested in discussing" still pass).
+        let originalSignificant = significantWords(original)
+        let inSet = Set(originalSignificant)
+        for word in significantWords(cleaned) where !inSet.contains(word) {
+            if word.allSatisfy({ $0.isNumber }) { continue }   // digits guarded in step 3
+            if !sharesStem(word, withAnyOf: originalSignificant) { return false }
+        }
+
+        // 5. Loose topical overlap — only to catch a total rewrite about something
         //    else. Deliberately low so real grammar rewrites are NOT rejected.
-        let significant = significantWords(original)
+        let significant = originalSignificant
         if significant.count >= 5 {
             let kept = Set(significantWords(cleaned))
             let survived = significant.filter { kept.contains($0) }.count
             if Double(survived) / Double(significant.count) < 0.3 { return false }
         }
         return true
+    }
+
+    /// True when `word` looks like a morphological variant of some original word:
+    /// a shared prefix of ≥4 chars covering at least half of the shorter word.
+    /// "discussing"~"discuss" and "interested"~"interesting" pass; homophones
+    /// like "peel"~"pill", "czech"~"check", "tank"~"bank" do not.
+    private static func sharesStem(_ word: String, withAnyOf candidates: [String]) -> Bool {
+        for other in candidates {
+            let common = zip(word, other).prefix { $0 == $1 }.count
+            let shorter = min(word.count, other.count)
+            if common >= 4, common * 2 >= shorter { return true }
+        }
+        return false
     }
 
     // MARK: - Helpers

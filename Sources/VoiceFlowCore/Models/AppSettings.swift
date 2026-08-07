@@ -29,6 +29,9 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var useLLMCleanup: Bool
     /// If true, never store raw audio and scrub transcripts marked private.
     public var privacyRedactionEnabled: Bool
+    /// Convert spoken punctuation words ("period" → "."). OFF by default: the
+    /// blind word→symbol mapping destroys those words used as ordinary nouns.
+    public var spokenPunctuationEnabled: Bool
 
     public init(
         microphoneDeviceID: String? = nil,
@@ -43,7 +46,8 @@ public struct AppSettings: Codable, Sendable, Equatable {
         overlayEnabled: Bool = true,
         launchAtLogin: Bool = false,
         useLLMCleanup: Bool = true,
-        privacyRedactionEnabled: Bool = false
+        privacyRedactionEnabled: Bool = false,
+        spokenPunctuationEnabled: Bool = false
     ) {
         self.microphoneDeviceID = microphoneDeviceID
         self.hotkey = hotkey
@@ -58,6 +62,29 @@ public struct AppSettings: Codable, Sendable, Equatable {
         self.launchAtLogin = launchAtLogin
         self.useLLMCleanup = useLLMCleanup
         self.privacyRedactionEnabled = privacyRedactionEnabled
+        self.spokenPunctuationEnabled = spokenPunctuationEnabled
+    }
+
+    /// Backward-compatible decoding: settings.json written by older builds lacks
+    /// newer keys; a missing key must fall back to its default, never reset the
+    /// whole settings file (SettingsStore returns `.default` on any throw).
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = AppSettings()
+        microphoneDeviceID = try c.decodeIfPresent(String.self, forKey: .microphoneDeviceID) ?? d.microphoneDeviceID
+        hotkey = try c.decodeIfPresent(HotkeyConfiguration.self, forKey: .hotkey) ?? d.hotkey
+        cleanupStrength = try c.decodeIfPresent(CleanupStrength.self, forKey: .cleanupStrength) ?? d.cleanupStrength
+        languageCode = try c.decodeIfPresent(String.self, forKey: .languageCode) ?? d.languageCode
+        defaultMode = try c.decodeIfPresent(DictationMode.self, forKey: .defaultMode) ?? d.defaultMode
+        vocabulary = try c.decodeIfPresent([VocabularyEntry].self, forKey: .vocabulary) ?? d.vocabulary
+        perAppBehaviors = try c.decodeIfPresent([PerAppBehavior].self, forKey: .perAppBehaviors) ?? d.perAppBehaviors
+        historyEnabled = try c.decodeIfPresent(Bool.self, forKey: .historyEnabled) ?? d.historyEnabled
+        historyRetentionLimit = try c.decodeIfPresent(Int.self, forKey: .historyRetentionLimit) ?? d.historyRetentionLimit
+        overlayEnabled = try c.decodeIfPresent(Bool.self, forKey: .overlayEnabled) ?? d.overlayEnabled
+        launchAtLogin = try c.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? d.launchAtLogin
+        useLLMCleanup = try c.decodeIfPresent(Bool.self, forKey: .useLLMCleanup) ?? d.useLLMCleanup
+        privacyRedactionEnabled = try c.decodeIfPresent(Bool.self, forKey: .privacyRedactionEnabled) ?? d.privacyRedactionEnabled
+        spokenPunctuationEnabled = try c.decodeIfPresent(Bool.self, forKey: .spokenPunctuationEnabled) ?? d.spokenPunctuationEnabled
     }
 
     public static let `default` = AppSettings()
