@@ -65,6 +65,7 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         options.temperature = 0
         options.temperatureFallbackCount = 3   // default 5 only adds tail latency
         options.skipSpecialTokens = true
+        options.suppressBlank = true      // keep [BLANK_AUDIO]-style tokens out on quiet clips
         options.withoutTimestamps = true
         options.wordTimestamps = false
         options.chunkingStrategy = ChunkingStrategy.none
