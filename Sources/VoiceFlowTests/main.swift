@@ -18,5 +18,6 @@ runHistoryStoreTests(suite)
 runSecurityTests(suite)
 runHotkeyTests(suite)
 runControllerTests(suite)
+runFallbackTranscriberTests(suite)
 
 suite.finish()

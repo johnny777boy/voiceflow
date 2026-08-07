@@ -22,6 +22,10 @@ final class AppCoordinator: ObservableObject {
     @Published private(set) var speechGranted = false
     @Published private(set) var inputMonitoringGranted = false
 
+    /// Whisper "High Accuracy" model lifecycle (download progress, readiness) —
+    /// observed by SettingsView for the progress UI.
+    let whisperManager: WhisperModelManager
+
     private let controller: DictationController
     private let live: SpeechEngine
     private let hotkeys: GlobalHotkeyManager
@@ -92,17 +96,25 @@ final class AppCoordinator: ObservableObject {
         engine.preferredLanguage = loaded.languageCode
         let live = engine
         self.live = live
-        // Transcriber: default is the fast on-device Apple engine. When the user
-        // turns on "High Accuracy", use on-device Whisper (WhisperKit) instead — the
-        // recorder (live) still captures audio to a file and passes it via
-        // AudioCapture.fileURL. Toggled via UserDefaults so no settings migration.
-        let transcriber: Transcribing
-        if UserDefaults.standard.bool(forKey: "useWhisperEngine"), #available(macOS 14.0, *) {
-            transcriber = WhisperKitTranscriber()
-            Log.transcription.notice("transcriber: WhisperKit (high accuracy)")
-        } else {
-            transcriber = live
-        }
+        // Transcriber: the fast Apple engine is ALWAYS the fallback. When the user
+        // turns on "High Accuracy", `WhisperModelManager` downloads + loads the
+        // Whisper model in the background; the router below re-checks readiness on
+        // every dictation, so Whisper takes over the moment it's ready (and Apple
+        // covers every dictation before that, and any Whisper runtime failure).
+        // No relaunch needed in either direction.
+        let whisper = WhisperKitTranscriber()
+        self.whisperManager = WhisperModelManager(transcriber: whisper)
+        let transcriber: Transcribing = FallbackTranscriber(
+            preferred: whisper,
+            fallback: live,
+            usePreferred: { [weak whisper] in
+                UserDefaults.standard.bool(forKey: WhisperModelManager.enabledDefaultsKey)
+                    && whisper?.isReady == true
+            },
+            onFallback: { reason in
+                Log.transcription.error("Whisper failed — fell back to Apple engine: \(reason, privacy: .public)")
+            }
+        )
         self.controller = DictationController(
             audio: live,
             transcriber: transcriber,
@@ -135,6 +147,9 @@ final class AppCoordinator: ObservableObject {
         registerHotkey()
         LoginItemManager.setEnabled(settings.launchAtLogin)
         refreshHistory()
+        // If High Accuracy was already on, resume the model download/load now —
+        // dictation stays on the Apple engine until Whisper reports ready.
+        whisperManager.bootstrapIfEnabled()
 
         // Re-check permissions whenever the app is refocused (e.g. after the user
         // toggles a permission in System Settings), so banners aren't stale — and
