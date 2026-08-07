@@ -83,18 +83,22 @@ public struct AppSettings: Codable, Sendable, Equatable {
     /// apps → email; common prose apps (chat, browsers, notes, docs) → Clean Writing.
     public static func autoMode(forBundleIdentifier bundleID: String) -> DictationMode? {
         let id = bundleID.lowercased()
+        // EXACT bundle-id match only — a substring match ("mail", "terminal") would
+        // misclassify unrelated apps (com.example.mailroomInventory). Unknown apps
+        // fall through to Clean Writing, which is the safe default for prose.
         let codeApps: Set<String> = [
-            "com.microsoft.vscode", "com.microsoft.vscodeinsiders", "com.visualstudio.code.oss",
-            "com.todesktop.230313mzl4w4u92",           // Cursor
+            "com.microsoft.vscode", "com.microsoft.vscodeinsiders", "com.vscodium",
+            "com.visualstudio.code.oss", "com.todesktop.230313mzl4w4u92",   // Cursor
             "com.apple.terminal", "com.googlecode.iterm2", "dev.warp.warp-stable",
-            "com.apple.dt.xcode", "com.jetbrains.intellij", "com.sublimetext.4", "com.github.atom"
+            "com.apple.dt.xcode", "com.jetbrains.intellij", "com.jetbrains.pycharm",
+            "com.sublimetext.4", "com.sublimetext.3", "com.github.atom", "co.zeit.hyper"
         ]
-        if codeApps.contains(id) || id.contains("iterm") || id.contains("terminal")
-            || id.hasSuffix(".vscode") { return .claudeCode }
+        if codeApps.contains(id) { return .claudeCode }
         let mailApps: Set<String> = [
-            "com.apple.mail", "com.microsoft.outlook", "com.readdle.smartemail-mac", "com.airmailapp.airmail"
+            "com.apple.mail", "com.microsoft.outlook", "com.readdle.smartemail-mac",
+            "com.airmailapp.airmail", "ru.keepcoder.telegram.mail", "com.sparkmailapp.spark"
         ]
-        if mailApps.contains(id) || id.contains("mail") || id.contains("outlook") { return .email }
+        if mailApps.contains(id) { return .email }
         // Chat / browsers / notes / docs — prose destinations → polished writing.
         return .cleanWriting
     }

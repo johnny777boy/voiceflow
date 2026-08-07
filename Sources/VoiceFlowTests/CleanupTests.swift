@@ -178,6 +178,9 @@ func runCleanupTests(_ s: TestSuite) {
         s.expectEqual(AppSettings.autoMode(forBundleIdentifier: "com.apple.mail"), .email)
         s.expectEqual(AppSettings.autoMode(forBundleIdentifier: "com.tinyspeck.slackmacgap"), .cleanWriting)
         s.expectEqual(AppSettings.autoMode(forBundleIdentifier: "com.apple.Notes"), .cleanWriting)
+        // Unrelated bundle ids must NOT be misclassified by substring matching.
+        s.expectEqual(AppSettings.autoMode(forBundleIdentifier: "com.example.mailroomInventory"), .cleanWriting)
+        s.expectEqual(AppSettings.autoMode(forBundleIdentifier: "com.example.terminalVelocity"), .cleanWriting)
     }
 }
 

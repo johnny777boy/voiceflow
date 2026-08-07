@@ -115,6 +115,7 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
             throw VoiceFlowError.audioEngineFailure("Could not open capture file: \(error.localizedDescription)")
         }
         lock.lock()
+        if let stale = self.fileURL { try? FileManager.default.removeItem(at: stale) }  // never accumulate
         self.audioFile = file
         self.fileURL = url
         // Write the pre-roll (the ~0.5s captured just BEFORE the keypress) first, so
@@ -149,6 +150,12 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
     private func takeFileURL() -> URL? {
         lock.lock(); defer { lock.unlock() }
         let u = fileURL; fileURL = nil; return u
+    }
+
+    /// Remove the temp capture file for a recording that won't be transcribed
+    /// (cancel / short-hold), so temp files never accumulate.
+    func discardPendingCapture() {
+        if let url = takeFileURL() { try? FileManager.default.removeItem(at: url) }
     }
 
     func transcribe(_ audio: AudioCapture, languageCode: String) async throws -> TranscriptionResult {
