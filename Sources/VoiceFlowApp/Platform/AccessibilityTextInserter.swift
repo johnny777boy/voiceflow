@@ -52,14 +52,21 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
             return InsertionOutcome(strategy: .copyOnly, didInsert: false,
                 note: "Focused field is secure; copied to clipboard instead of inserting.")
         }
+        // When continuing existing text (a 2nd dictation into the same box), add a
+        // leading space so words don't glue together ("world" + "how" → "world how").
+        // Computed once here; the recursive fallthrough reuses the same payload.
+        let payload = strategy == .copyOnly ? text : leadingSpaceIfNeeded() + text
+        return try deliver(payload, using: strategy)
+    }
 
+    private func deliver(_ text: String, using strategy: InsertionStrategy) throws -> InsertionOutcome {
         switch strategy {
         case .accessibility:
             if insertViaAccessibility(text) {
                 return InsertionOutcome(strategy: .accessibility, didInsert: true)
             }
-            // Fall through to clipboard paste if AX insertion didn't take.
-            return try insert(text, using: .clipboardPaste)
+            // Fall through to clipboard paste if AX insertion didn't take (payload already spaced).
+            return try deliver(text, using: .clipboardPaste)
 
         case .clipboardPaste:
             // Wispr Flow's proven method: put the text on the clipboard, send ⌘V to
@@ -80,6 +87,18 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
             copyToClipboard(text)
             return InsertionOutcome(strategy: .copyOnly, didInsert: false)
         }
+    }
+
+    /// A single leading space when the caret sits right after existing, non-space
+    /// text — so a follow-up dictation continues cleanly instead of gluing on.
+    /// Empty when we can't read the field (safe: no change) or when a space/newline/
+    /// opening bracket already precedes the caret.
+    private func leadingSpaceIfNeeded() -> String {
+        guard let focused = AX.focusedElement(),
+              let before = AX.characterBeforeCaret(focused) else { return "" }
+        if before.isWhitespace || before.isNewline { return "" }
+        if "([{\u{201C}\u{2018}\"'".contains(before) { return "" }   // after ( " ' etc.
+        return " "
     }
 
     /// Whether the *currently* focused element is a secure (password) field.
