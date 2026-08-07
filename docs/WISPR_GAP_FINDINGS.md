@@ -86,3 +86,29 @@ WhisperKit PR #514 — verify pinned version before using.
 Sources: wensenwu.com/thoughts/wispr-flow-investigation · baseten.co/resources/customers/wispr-flow ·
 wisprflow.ai/research/supporting-languages · argmaxinc.com/blog/apple-and-argmax ·
 developer.apple.com/forums/thread/811083 · github.com/argmaxinc/argmax-oss-swift issues/372, pull/514
+
+## Round 2 (same day): verbatim fidelity — 12-agent verified workflow, IMPLEMENTED
+
+Goal: zero hallucinated/extra/substituted words. 6 researchers → adversarial
+refuters → all shipped on the branch (commit b43b0db, 106 tests):
+
+- **Self-inflicted corruptions PROVEN by execution and fixed**: Raw mode ran
+  vocabulary substitution (now truly verbatim); spoken punctuation destroyed
+  "period"/"comma" as nouns (now opt-in, Settings ▸ General); filler removal
+  deleted "ER"/"err"/"ah" (removed from list); CleanupGuard passed homophone
+  swaps pill→peel/check→czech (now novel-word check, stem-tolerant so grammar
+  fixes still pass); Anthropic path had no guard (now guarded).
+- **Whisper anti-hallucination**: energy gate (maxRMS<0.005 AND peak<0.015 —
+  verifier-corrected from 0.02, which would eat quiet speakers; energies logged
+  per clip for tuning); OpenAI non_speech_tokens suppression (WhisperKit v0.18
+  ships an empty TODO); TranscriptSanity phantom-phrase post-filter (whole-output
+  match + corroborating doubt only — fail-open); temperatureFallbackCount=1.
+- **Dead config discovered**: noSpeechThreshold does NOTHING in WhisperKit v0.18
+  (noSpeechProb hardcoded 0). Community recipes tuning it don't transplant.
+  Re-audit on any WhisperKit bump (issue #27: conflicts with prefill).
+- **Policy change**: CleanupGuard now rejects synonym substitutions
+  ("problematic"→"issue") — exact words outrank aggressive grammar polish.
+- **Deferred (designs ready in agent reports)**: dual-engine agreement rescoring
+  (Apple+Whisper on same buffer, drop words only one engine heard on low-energy
+  audio); Silero-class VAD; promptTokens vocabulary biasing (verify PR #514 in
+  pinned WhisperKit first); preroll trim 0.8s→0.3s (audio-path — needs live mic).
