@@ -29,7 +29,10 @@ final class FoundationModelsCleanupProvider: CleanupProviding, @unchecked Sendab
             maximumResponseTokens: max(256, rawText.count)
         )
         let response = try await session.respond(to: rawText, options: options)
-        let text = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Strip any "Here is the cleaned text:" preamble the small model leaks despite
+        // instructions, then trim.
+        let text = TextNormalizer.stripLLMPreamble(response.content)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { throw VoiceFlowError.cleanupProviderUnavailable }
 
         // Safety net: cleanup must edit, not rewrite. If the model changed meaning

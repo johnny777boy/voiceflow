@@ -124,6 +124,16 @@ func runCleanupTests(_ s: TestSuite) {
         s.expectEqual(engine.cleanSync("wait comma stop", context: ctx(.cleanWriting)), "Wait, stop.")
     }
 
+    s.test("stripLLMPreamble removes leaked 'Here is the cleaned text:' prefixes") { s in
+        s.expectEqual(TextNormalizer.stripLLMPreamble("Here is the cleaned text:\n\nHere, I'm gonna test it right now."),
+                      "Here, I'm gonna test it right now.")
+        s.expectEqual(TextNormalizer.stripLLMPreamble("Sure, here's the corrected version: Hello world."), "Hello world.")
+        s.expectEqual(TextNormalizer.stripLLMPreamble("Cleaned text: buy milk"), "buy milk")
+        // Genuine content must be untouched:
+        s.expectEqual(TextNormalizer.stripLLMPreamble("Here is the plan: buy milk."), "Here is the plan: buy milk.")
+        s.expectEqual(TextNormalizer.stripLLMPreamble("Hello there, how are you?"), "Hello there, how are you?")
+    }
+
     s.test("tidyProse inserts missing spaces after punctuation, protects decimals/domains") { s in
         s.expectEqual(TextNormalizer.tidyProse("Hello,world"), "Hello, world")
         s.expectEqual(TextNormalizer.tidyProse("It works.Our system is next"), "It works. Our system is next")
