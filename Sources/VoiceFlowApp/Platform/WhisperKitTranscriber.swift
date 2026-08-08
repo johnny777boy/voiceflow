@@ -220,24 +220,21 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         if suspicious {
             Log.transcription.notice("Whisper phantom candidate \"\(text, privacy: .public)\" (dur=\(clipSeconds, privacy: .public)s logProb=\(minLogProb ?? 0, privacy: .public) maxRMS=\(maxChunkRMS, privacy: .public)) — asking arbiter")
             var arbiterUnavailable = silenceArbiter == nil
-            if let arbiter = silenceArbiter {
-                do {
-                    // Consumes + deletes the capture file via the engine's own path.
-                    _ = try await arbiter.transcribe(audio, languageCode: languageCode)
+            if silenceArbiter != nil {
+                switch try await consultArbiter(audio, languageCode: languageCode, context: context) {
+                case .heard(let second):
                     Log.transcription.notice("Arbiter heard speech — delivering Whisper text")
-                    return VoiceFlowCore.TranscriptionResult(text: text)
-                } catch VoiceFlowError.emptyTranscript {
+                    // The second opinion is already paid for; let it fix a name.
+                    return VoiceFlowCore.TranscriptionResult(text: vote(primary: text, secondary: second, context: context))
+                case .silence:
                     // The one verdict that means "silence": discard the phantom.
                     Log.transcription.notice("Arbiter heard nothing — phantom discarded")
                     throw VoiceFlowError.emptyTranscript
-                } catch is CancellationError {
-                    throw CancellationError()   // a cancelled dictation stays cancelled
-                } catch {
+                case .unavailable:
                     // Infrastructure failure (model asset, file read, analyzer) is
                     // NOT a silence verdict — a real "Yes." must not be eaten
                     // because Apple's model was mid-download. Fall through to the
                     // signal-based filter instead.
-                    Log.transcription.error("Arbiter unavailable (\(String(describing: error), privacy: .public)) — using corroboration filter")
                     arbiterUnavailable = true
                 }
             }
@@ -247,11 +244,71 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
             ) {
                 throw VoiceFlowError.emptyTranscript
             }
+        } else if silenceArbiter != nil,
+                  DualEngineVoting.containsNearMiss(
+                      text: text,
+                      vocabulary: context.orderedTerms,
+                      // A decoder that was unsure gets the wider net.
+                      maxEdits: (minLogProb ?? 0) < -0.55 ? 2 : 1
+                  ) {
+            // Phase 5 — word-level voting. Whisper produced something that is one
+            // or two characters away from a term the user cares about, which is
+            // what a misheard name looks like. Ask the other engine about the SAME
+            // audio and take its word only where it matches the vocabulary and
+            // Whisper's doesn't. Bounded on purpose: no near-miss, no second run,
+            // so the ordinary dictation pays nothing.
+            Log.transcription.notice("Vocabulary near-miss in Whisper output — asking the second engine")
+            if case .heard(let second) = try await consultArbiter(audio, languageCode: languageCode, context: context) {
+                let merged = vote(primary: text, secondary: second, context: context)
+                try? FileManager.default.removeItem(at: url)
+                return VoiceFlowCore.TranscriptionResult(text: merged)
+            }
+            // Silence or unavailable: a near-miss is not a phantom signal, so the
+            // Whisper text stands exactly as decoded.
         }
         // Success: the capture file is consumed here. On ANY failure above we leave
         // the file alone — the FallbackTranscriber re-runs the Apple engine, which
         // reads the same file via its internal URL.
         try? FileManager.default.removeItem(at: url)
         return VoiceFlowCore.TranscriptionResult(text: text)
+    }
+
+    /// What the second engine made of the same recording.
+    private enum ArbiterVerdict {
+        case heard(String)
+        case silence
+        case unavailable
+    }
+
+    /// Run the Apple engine over the same capture. Consumes (and deletes) the
+    /// capture file through that engine's own path, so it must be called at most
+    /// once per dictation.
+    private func consultArbiter(
+        _ audio: AudioCapture, languageCode: String, context: VoiceFlowCore.TranscriptionContext
+    ) async throws -> ArbiterVerdict {
+        guard let arbiter = silenceArbiter else { return .unavailable }
+        do {
+            let result = try await arbiter.transcribe(audio, languageCode: languageCode, context: context)
+            let trimmed = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? .silence : .heard(trimmed)
+        } catch VoiceFlowError.emptyTranscript {
+            return .silence
+        } catch is CancellationError {
+            throw CancellationError()   // a cancelled dictation stays cancelled
+        } catch {
+            Log.transcription.error("Arbiter unavailable (\(String(describing: error), privacy: .public))")
+            return .unavailable
+        }
+    }
+
+    /// Apply word-level voting, logging any word that changed hands.
+    private func vote(
+        primary: String, secondary: String, context: VoiceFlowCore.TranscriptionContext
+    ) -> String {
+        let result = DualEngineVoting.reconcile(
+            primary: primary, secondary: secondary, vocabulary: context.orderedTerms)
+        guard result.changedAnything else { return primary }
+        Log.transcription.notice("Dual-engine vote replaced \(result.substitutions.count, privacy: .public) word(s) with vocabulary-consistent alternatives")
+        return result.text
     }
 }

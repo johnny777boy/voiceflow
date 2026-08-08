@@ -24,5 +24,6 @@ runContextBiasTests(suite)
 runMetricsTests(suite)
 runLatencyTests(suite)
 runLearningTests(suite)
+runVotingTests(suite)
 
 suite.finish()
