@@ -9,11 +9,15 @@ public struct AudioCapture: Sendable, Equatable {
     public let sampleRate: Double
     /// Total captured duration in seconds.
     public let duration: TimeInterval
+    /// Path to the recorded audio file, for file-based transcribers (e.g. WhisperKit).
+    /// nil for engines that keep audio internally.
+    public let fileURL: URL?
 
-    public init(samples: [Float], sampleRate: Double, duration: TimeInterval) {
+    public init(samples: [Float], sampleRate: Double, duration: TimeInterval, fileURL: URL? = nil) {
         self.samples = samples
         self.sampleRate = sampleRate
         self.duration = duration
+        self.fileURL = fileURL
     }
 }
 

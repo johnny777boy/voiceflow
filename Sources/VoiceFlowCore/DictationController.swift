@@ -99,7 +99,8 @@ public actor DictationController {
             mode: mode,
             strength: settings.cleanupStrength,
             vocabulary: settings.vocabulary,
-            languageCode: settings.languageCode
+            languageCode: settings.languageCode,
+            spokenPunctuationEnabled: settings.spokenPunctuationEnabled
         )
         let clean = try await cleanup.clean(raw, context: context)
 

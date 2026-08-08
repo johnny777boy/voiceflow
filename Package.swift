@@ -18,6 +18,10 @@ let package = Package(
         .executable(name: "VoiceFlow", targets: ["VoiceFlowApp"]),
         .executable(name: "VoiceFlowTests", targets: ["VoiceFlowTests"])
     ],
+    dependencies: [
+        // On-device Whisper (Core ML / Neural Engine) for the optional High-Accuracy mode.
+        .package(url: "https://github.com/argmaxinc/WhisperKit", from: "0.9.0")
+    ],
     targets: [
         .target(
             name: "VoiceFlowCore",
@@ -32,7 +36,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "VoiceFlowApp",
-            dependencies: ["VoiceFlowCore"]
+            dependencies: [
+                "VoiceFlowCore",
+                .product(name: "WhisperKit", package: "WhisperKit")
+            ]
         ),
         .executableTarget(
             name: "VoiceFlowTests",

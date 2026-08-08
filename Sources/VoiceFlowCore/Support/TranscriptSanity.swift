@@ -1,0 +1,55 @@
+import Foundation
+
+/// Detects Whisper's canonical silence-hallucinations ("Thank you.", "Thanks for
+/// watching!", subtitle credits) so they are never inserted as dictation.
+///
+/// Design constraints from adversarial review — this filter must be provably
+/// unable to eat real speech:
+/// - WHOLE-output match only: a phrase inside a longer utterance never matches,
+///   so a dictated email ending in "thank you" survives untouched.
+/// - Corroboration required: even a whole-output match is dropped ONLY with an
+///   independent doubt signal (low decoder confidence, or near-silent audio).
+///   A confidently transcribed, audible "Thank you." is delivered.
+/// - Fail-open: with no signals available, nothing is ever dropped.
+public enum TranscriptSanity {
+
+    /// Frequency-ranked phantom phrases from the Whisper hallucination literature
+    /// ("thank you" alone is ~25% of all non-speech hallucinations) plus the
+    /// classic YouTube-outro/subtitle-credit strings. Compared against the
+    /// NORMALIZED full transcript.
+    public static let phantomPhrases: Set<String> = [
+        "thank you",
+        "thanks for watching",
+        "thank you for watching",
+        "thank you so much for watching",
+        "thanks",
+        "bye",
+        "you",
+        "please subscribe",
+        "subtitles by the amara org community",
+        "subtitles by the amaraorg community",
+        "thank you for listening",
+    ]
+
+    /// Lowercase, strip everything but letters/digits/spaces, collapse whitespace.
+    public static func normalized(_ text: String) -> String {
+        let lowered = text.lowercased()
+        let kept = lowered.map { ch -> Character in
+            (ch.isLetter || ch.isNumber || ch == " ") ? ch : " "
+        }
+        return String(kept).split(separator: " ").joined(separator: " ")
+    }
+
+    /// True when the ENTIRE transcript is a known phantom phrase AND at least one
+    /// doubt signal corroborates (decoder avg log-prob below -1.0, or the clip
+    /// was near-silent). Both-nil signals ⇒ always false (fail-open).
+    public static func isLikelyHallucination(
+        text: String,
+        minAvgLogProb: Float?,
+        nearSilence: Bool
+    ) -> Bool {
+        guard phantomPhrases.contains(normalized(text)) else { return false }
+        let lowConfidence = (minAvgLogProb ?? 0) < -1.0
+        return lowConfidence || nearSilence
+    }
+}

@@ -34,7 +34,15 @@ public struct LLMCleanupProvider: CleanupProviding {
             throw VoiceFlowError.cleanupProviderUnavailable
         }
         let system = CleanupPromptBuilder.systemPrompt(for: context.mode, strength: context.strength)
-        return try await transport.complete(systemPrompt: system, userText: rawText, apiKey: key, model: model)
+        let raw = try await transport.complete(systemPrompt: system, userText: rawText, apiKey: key, model: model)
+        // Same output hygiene as the on-device provider: strip any leaked
+        // "Here is the cleaned text:" preamble, and reject meaning-changing
+        // rewrites so the pipeline falls back to the rule-based result.
+        let text = TextNormalizer.stripLLMPreamble(raw)
+        guard CleanupGuard.preservesMeaning(original: rawText, cleaned: text) else {
+            throw VoiceFlowError.cleanupProviderUnavailable
+        }
+        return text
     }
 }
 

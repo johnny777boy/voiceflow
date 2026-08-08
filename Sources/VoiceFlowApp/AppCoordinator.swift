@@ -22,6 +22,10 @@ final class AppCoordinator: ObservableObject {
     @Published private(set) var speechGranted = false
     @Published private(set) var inputMonitoringGranted = false
 
+    /// Whisper "High Accuracy" model lifecycle (download progress, readiness) —
+    /// observed by SettingsView for the progress UI.
+    let whisperManager: WhisperModelManager
+
     private let controller: DictationController
     private let live: SpeechEngine
     private let hotkeys: GlobalHotkeyManager
@@ -92,9 +96,28 @@ final class AppCoordinator: ObservableObject {
         engine.preferredLanguage = loaded.languageCode
         let live = engine
         self.live = live
+        // Transcriber: the fast Apple engine is ALWAYS the fallback. When the user
+        // turns on "High Accuracy", `WhisperModelManager` downloads + loads the
+        // Whisper model in the background; the router below re-checks readiness on
+        // every dictation, so Whisper takes over the moment it's ready (and Apple
+        // covers every dictation before that, and any Whisper runtime failure).
+        // No relaunch needed in either direction.
+        let whisper = WhisperKitTranscriber()
+        self.whisperManager = WhisperModelManager(transcriber: whisper)
+        let transcriber: Transcribing = FallbackTranscriber(
+            preferred: whisper,
+            fallback: live,
+            usePreferred: { [weak whisper] in
+                UserDefaults.standard.bool(forKey: WhisperModelManager.enabledDefaultsKey)
+                    && whisper?.isReady == true
+            },
+            onFallback: { reason in
+                Log.transcription.error("Whisper failed — fell back to Apple engine: \(reason, privacy: .public)")
+            }
+        )
         self.controller = DictationController(
             audio: live,
-            transcriber: live,
+            transcriber: transcriber,
             cleanup: pipeline,
             inserter: AccessibilityTextInserter(),
             activeApp: WorkspaceActiveAppProvider(),
@@ -111,8 +134,12 @@ final class AppCoordinator: ObservableObject {
         // Feed the live mic level into the floating waveform pill AND the window.
         live.levelHandler = { [weak self] level in
             Task { @MainActor in
-                self?.overlay.updateLevel(level)
-                self?.audioLevel = CGFloat(level)
+                guard let self else { return }
+                self.overlay.updateLevel(level)
+                // Coalesce: only publish visible changes — every publish re-renders
+                // every window observing the coordinator.
+                let new = CGFloat(level)
+                if abs(new - self.audioLevel) > 0.01 { self.audioLevel = new }
             }
         }
         // Bias recognition toward the user's saved names/terms.
@@ -124,6 +151,9 @@ final class AppCoordinator: ObservableObject {
         registerHotkey()
         LoginItemManager.setEnabled(settings.launchAtLogin)
         refreshHistory()
+        // If High Accuracy was already on, resume the model download/load now —
+        // dictation stays on the Apple engine until Whisper reports ready.
+        whisperManager.bootstrapIfEnabled()
 
         // Re-check permissions whenever the app is refocused (e.g. after the user
         // toggles a permission in System Settings), so banners aren't stale — and
@@ -139,6 +169,25 @@ final class AppCoordinator: ObservableObject {
                 // before a grant landed comes up dead and must be recreated.
                 if self.accessibilityGranted, self.inputMonitoringGranted {
                     self.registerHotkey()
+                }
+            }
+        }
+
+        // Self-heal after sleep: macOS can silently disable a global event tap
+        // across a sleep/wake cycle, leaving the hotkey dead until the user
+        // happens to click the app (didBecomeActive). Rebuild the tap on every
+        // wake — for a menu-bar app that may never be "activated", this is the
+        // only reliable trigger. Slight delay lets the system settle first.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                guard let self else { return }
+                self.refreshPermissionStatus()
+                if self.accessibilityGranted, self.inputMonitoringGranted {
+                    self.registerHotkey()
+                    Log.hotkey.notice("Rebuilt hotkey tap after wake")
                 }
             }
         }

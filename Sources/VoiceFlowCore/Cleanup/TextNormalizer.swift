@@ -13,8 +13,11 @@ public enum TextNormalizer {
     /// change the speaker's meaning.
     /// NOTE: "you know" and "i mean" are deliberately NOT here — deleting them
     /// unconditionally changes meaning ("Do you know the answer" → "Do the answer").
+    /// NOTE: "er", "err", and "ah" are deliberately NOT here — matching is
+    /// case-insensitive, so they destroyed the real words "ER" (emergency room),
+    /// "err" ("to err is human"), and the interjection "ah" ("ah, I see").
     public static let fillerWords: Set<String> = [
-        "um", "uh", "uhh", "umm", "uhm", "er", "err", "erm", "ah", "hmm", "mhm"
+        "um", "uh", "uhh", "umm", "uhm", "erm", "hmm", "mhm"
     ]
 
     /// Collapse runs of whitespace to single spaces and trim ends. Newlines are

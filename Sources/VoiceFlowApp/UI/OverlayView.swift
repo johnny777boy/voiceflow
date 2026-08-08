@@ -47,10 +47,10 @@ struct OverlayView: View {
             WaveformBars(level: model.level, gradient: Self.accent)
                 .frame(width: 82, height: 16)
         case .processing:
-            HStack(spacing: 8) {
-                ProgressView().controlSize(.small).tint(.white)
-                EmptyView()
-            }
+            // NOT ProgressView: the AppKit-backed spinner ignores .tint on macOS
+            // and renders dark gray — invisible on this near-black pill.
+            SpinnerRing(gradient: Self.accent)
+                .frame(width: 14, height: 14)
         case .done(let r):
             Image(systemName: r.outcome.didInsert ? "checkmark.circle.fill" : "doc.on.clipboard.fill")
                 .font(.system(size: 16, weight: .semibold))
@@ -67,6 +67,23 @@ struct OverlayView: View {
         case .processing: return "Transcribing…"
         case .done(let r): return r.outcome.didInsert ? "Inserted" : "Copied to clipboard"
         case .error:      return "Try again"
+        }
+    }
+}
+
+/// A guaranteed-visible activity spinner: a rotating gradient arc drawn in
+/// SwiftUI (same TimelineView technique as the waveform), so it can't be washed
+/// out by AppKit theming.
+private struct SpinnerRing: View {
+    var gradient: LinearGradient
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { timeline in
+            let t = timeline.date.timeIntervalSinceReferenceDate
+            Circle()
+                .trim(from: 0, to: 0.72)
+                .stroke(gradient, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                .rotationEffect(.radians(t * 4.4))
         }
     }
 }
