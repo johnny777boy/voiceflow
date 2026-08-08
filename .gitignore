@@ -20,3 +20,6 @@ dist/
 # Secrets
 *.env
 secrets/
+
+# Machine-local Claude session state
+.claude/
