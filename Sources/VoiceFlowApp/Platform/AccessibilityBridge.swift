@@ -31,6 +31,26 @@ enum AX {
         AXUIElementSetAttributeValue(element, attribute as CFString, value as CFString) == .success
     }
 
+    /// The caret offset (UTF-16 units) from the selected-text range, if readable.
+    static func caretLocation(_ element: AXUIElement) -> Int? {
+        var raw: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &raw) == .success,
+              let r = raw, CFGetTypeID(r) == AXValueGetTypeID() else { return nil }
+        var range = CFRange()
+        guard AXValueGetValue(r as! AXValue, .cfRange, &range) else { return nil }
+        // A non-empty selection means the user is selecting, not typing at a caret.
+        guard range.length == 0 else { return nil }
+        return range.location
+    }
+
+    /// Select an explicit range so the next `kAXSelectedTextAttribute` write
+    /// replaces exactly those characters.
+    static func setSelectedRange(_ element: AXUIElement, location: Int, length: Int) -> Bool {
+        var range = CFRange(location: location, length: length)
+        guard let value = AXValueCreate(.cfRange, &range) else { return false }
+        return AXUIElementSetAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, value) == .success
+    }
+
     /// The system-wide focused UI element (requires Accessibility permission).
     static func focusedElement() -> AXUIElement? {
         let system = AXUIElementCreateSystemWide()

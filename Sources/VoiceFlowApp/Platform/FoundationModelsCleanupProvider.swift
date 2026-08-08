@@ -14,6 +14,17 @@ final class FoundationModelsCleanupProvider: CleanupProviding, @unchecked Sendab
 
     static var isAvailable: Bool { SystemLanguageModel.default.isAvailable }
 
+    /// Load the model's weights while the user is still talking, so the LLM pass
+    /// starts warm instead of paying a cold start on the first dictation of a
+    /// session. A NEW session is still created per dictation — reusing one would
+    /// accumulate transcript history and let earlier dictations bleed into later
+    /// cleanups, which is exactly the drift the verbatim guard exists to stop.
+    func prewarm() {
+        guard SystemLanguageModel.default.isAvailable else { return }
+        let instructions = CleanupPromptBuilder.systemPrompt(for: .cleanWriting, strength: .standard)
+        LanguageModelSession(instructions: instructions).prewarm()
+    }
+
     func clean(_ rawText: String, context: CleanupContext) async throws -> String {
         guard SystemLanguageModel.default.isAvailable else {
             throw VoiceFlowError.cleanupProviderUnavailable

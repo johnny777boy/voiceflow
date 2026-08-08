@@ -19,6 +19,9 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
     private var lastInsertionBundleID: String?
     private var lastPayloadEndedInWhitespace = false
     private var preparedBundleID: String?
+    /// The exact string last delivered (leading space included), for two-phase
+    /// delivery's in-place upgrade.
+    private var lastPayload: String?
 
     func currentCapabilities() -> DestinationCapabilities {
         // Attempt insertion for any non-secure destination. AX role detection is
@@ -79,9 +82,54 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
             lastInsertedAt = Date()
             lastInsertionBundleID = preparedBundleID
             lastPayloadEndedInWhitespace = payload.last?.isWhitespace ?? true
+            lastPayload = payload
             memoryLock.unlock()
         }
         return outcome
+    }
+
+    /// Two-phase delivery's in-place upgrade.
+    ///
+    /// Refuses unless it can PROVE the field still holds exactly what we
+    /// delivered, immediately before a collapsed caret, in the same app, moments
+    /// ago. Anything else — the user typed, selected, moved the caret, switched
+    /// window, or the field hides its text from Accessibility — returns false and
+    /// changes nothing, leaving the already-correct phase-one text alone.
+    func replaceLastInsertion(with newText: String) -> Bool {
+        memoryLock.lock()
+        let payload = lastPayload
+        let insertedAt = lastInsertedAt
+        let bundleID = lastInsertionBundleID
+        memoryLock.unlock()
+
+        guard let payload, let insertedAt, Date().timeIntervalSince(insertedAt) < 10 else { return false }
+        guard bundleID == nil || NSWorkspace.shared.frontmostApplication?.bundleIdentifier == bundleID else {
+            return false
+        }
+        if focusedFieldIsSecure() { return false }
+        guard let focused = AX.focusedElement(), !Self.isSecure(focused) else { return false }
+        guard AX.isSettable(focused, kAXSelectedTextAttribute) else { return false }
+        guard let value = AX.string(focused, kAXValueAttribute),
+              let caret = AX.caretLocation(focused),
+              let range = RefinementPlanner.replacementRange(
+                  value: value, caretUTF16: caret, delivered: payload) else { return false }
+
+        // Preserve the same leading gap the original payload carried, so the
+        // upgrade can't glue words together or drop a space.
+        let prefix = payload.hasPrefix(" ") ? " " : ""
+        let replacement = prefix + newText
+        guard AX.setSelectedRange(focused, location: range.location, length: range.length) else { return false }
+        guard AX.setString(focused, kAXSelectedTextAttribute, replacement) else {
+            // Restore the collapsed caret so a failed upgrade doesn't leave the
+            // user's own text selected (one keystroke from being overwritten).
+            _ = AX.setSelectedRange(focused, location: caret, length: 0)
+            return false
+        }
+        memoryLock.lock()
+        lastPayload = replacement
+        lastPayloadEndedInWhitespace = replacement.last?.isWhitespace ?? true
+        memoryLock.unlock()
+        return true
     }
 
     private func deliver(_ text: String, using strategy: InsertionStrategy) throws -> InsertionOutcome {

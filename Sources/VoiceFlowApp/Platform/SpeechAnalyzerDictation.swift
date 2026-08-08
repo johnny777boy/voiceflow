@@ -137,14 +137,24 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
         Log.transcription.notice("SA record: warm=\(self.engine != nil, privacy: .public) prerollFrames=\(prerollFrames, privacy: .public)")
     }
 
+    /// Drain: let the tap keep writing for a beat so the trailing audio (the last
+    /// word) lands in the file before it closes.
+    ///
+    /// The wait itself is unchanged — same 0.18s, same tap, same file, same
+    /// pre-roll — but it is now an async suspension performed BEFORE the
+    /// main-thread stop, instead of a `Thread.sleep` inside it. Blocking the main
+    /// thread for 0.18s on every dictation stalled the overlay animation and the
+    /// window at exactly the moment the user is watching for feedback.
+    func drainBeforeStop() async {
+        guard isRecording else { return }
+        try? await Task.sleep(nanoseconds: 180_000_000)
+    }
+
     func stopRecording() throws -> AudioCapture { try onMain { try self.stopRecordingImpl() } }
 
     private func stopRecordingImpl() throws -> AudioCapture {
         guard isRecording else { return AudioCapture(samples: [], sampleRate: 16_000, duration: 0) }
         isRecording = false
-        // Drain: keep writing for a beat so the trailing audio (the last word) is
-        // captured before we stop writing. The engine stays WARM for next time.
-        Thread.sleep(forTimeInterval: 0.18)
         lock.lock()
         recording = false
         let file = audioFile

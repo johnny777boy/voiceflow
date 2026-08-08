@@ -36,6 +36,12 @@ struct SettingsView: View {
             Picker("Cleanup strength", selection: $draft.cleanupStrength) {
                 ForEach(CleanupStrength.allCases, id: \.self) { Text($0.displayName).tag($0) }
             }
+            Toggle("Fast path for short phrases", isOn: $draft.fastShortUtterances)
+            Text("Skips the AI polish for casual replies of eight words or fewer (\"on my way\"), where the offline rules already produce the same text about a second sooner. Questions and email always keep the AI pass.")
+                .font(.caption).foregroundStyle(.secondary)
+            Toggle("Insert instantly, polish in place (experimental)", isOn: $draft.twoPhaseDeliveryEnabled)
+            Text("Puts the offline result in the field the moment it's ready, then upgrades it in place when the AI pass finishes. Off by default — the in-place edit is abandoned if you've started typing, but it hasn't been lived on yet.")
+                .font(.caption).foregroundStyle(.secondary)
             Toggle("Spoken punctuation commands", isOn: $draft.spokenPunctuationEnabled)
             Text("Say \"period\" or \"comma\" to type . and , — off by default because it also rewrites those words when you mean them (\"during that period\" → \"during that.\").")
                 .font(.caption).foregroundStyle(.secondary)

@@ -22,5 +22,6 @@ runFallbackTranscriberTests(suite)
 runVerbatimTests(suite)
 runContextBiasTests(suite)
 runMetricsTests(suite)
+runLatencyTests(suite)
 
 suite.finish()

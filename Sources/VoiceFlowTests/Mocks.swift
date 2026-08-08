@@ -41,6 +41,9 @@ final class MockTranscriber: Transcribing, @unchecked Sendable {
     var permissionGranted = true
     var resultToReturn = TranscriptionResult(text: "hello world")
     var error: Error?
+    /// Simulates a transcription that takes real time, so a test can land another
+    /// call while a dictation is genuinely mid-flight.
+    var delay: TimeInterval = 0
     private(set) var lastLanguage: String?
     private(set) var lastContext: TranscriptionContext?
 
@@ -52,6 +55,7 @@ final class MockTranscriber: Transcribing, @unchecked Sendable {
     ) async throws -> TranscriptionResult {
         lastLanguage = languageCode
         lastContext = context
+        if delay > 0 { try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
         if let error { throw error }
         return resultToReturn
     }
@@ -82,15 +86,27 @@ final class MockTextInserter: TextInserting, @unchecked Sendable {
         isSecureInput: false
     )
     var insertError: Error?
+    /// Whether the destination accepts an in-place two-phase upgrade.
+    var supportsReplacement = false
     private(set) var insertedText: String?
     private(set) var insertedStrategy: InsertionStrategy?
     private(set) var copiedText: String?
+    private(set) var replacedText: String?
+    private(set) var insertCount = 0
 
     func insert(_ text: String, using strategy: InsertionStrategy) throws -> InsertionOutcome {
         if let insertError { throw insertError }
         insertedText = text
         insertedStrategy = strategy
+        insertCount += 1
         return InsertionOutcome(strategy: strategy, didInsert: strategy != .copyOnly)
+    }
+
+    func replaceLastInsertion(with newText: String) -> Bool {
+        guard supportsReplacement else { return false }
+        replacedText = newText
+        insertedText = newText
+        return true
     }
     func copyToClipboard(_ text: String) { copiedText = text }
     func currentCapabilities() -> DestinationCapabilities { capabilities }

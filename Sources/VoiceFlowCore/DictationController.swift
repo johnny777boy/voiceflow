@@ -40,6 +40,10 @@ public actor DictationController {
     /// the user is still speaking, never after they release the key.
     private var screenHarvest: Task<Void, Never>?
     private var screenHarvestResult: HarvestBox?
+    /// True from the moment `finishRecording` takes the capture until it returns.
+    /// The actor is reentrant across its `await`s, so this marks the window in
+    /// which another call must not touch the recorder.
+    private var isFinishing = false
 
     /// One-shot mailbox for the harvest result. A plain box rather than
     /// `await task.value` on purpose: the AX read is synchronous C code that
@@ -94,10 +98,19 @@ public actor DictationController {
         recordStartTime = time.now()
         try audio.startRecording()
         startScreenHarvest()
+        // Load the cleanup model's weights while the user talks, so the first
+        // dictation of a session doesn't pay the cold start.
+        cleanup.prewarm()
     }
 
     /// Cancel an in-progress recording without transcribing or inserting.
+    ///
+    /// A finish that is already running OWNS the capture: tearing the recorder
+    /// down underneath it would delete the very file being transcribed. Cancel
+    /// during transcription is therefore a no-op — the dictation completes, which
+    /// is also what the user sees happen.
     public func cancelRecording() {
+        guard !isFinishing else { return }
         screenHarvest?.cancel()
         screenHarvest = nil
         screenHarvestResult = nil
@@ -164,6 +177,11 @@ public actor DictationController {
         }
         pendingSnapshot = nil
 
+        // Drain first (async, off the main thread), then take the capture. From
+        // here until this call returns, the capture belongs to this finish.
+        await audio.drainBeforeStop()
+        isFinishing = true
+        defer { isFinishing = false }
         let capture = try audio.stopRecording()
         // Everything after this point is the number the user actually feels:
         // key released → text in the field. Hold time is deliberately excluded.
@@ -186,9 +204,18 @@ public actor DictationController {
             strength: settings.cleanupStrength,
             vocabulary: settings.vocabulary,
             languageCode: settings.languageCode,
-            spokenPunctuationEnabled: settings.spokenPunctuationEnabled
+            spokenPunctuationEnabled: settings.spokenPunctuationEnabled,
+            fastPathEnabled: settings.fastShortUtterances
         )
-        let clean = try await cleanup.clean(raw, context: context)
+
+        // Two-phase delivery (OFF by default, needs live testing): put the
+        // deterministic text on screen immediately, then quietly upgrade it in
+        // place once the LLM polish arrives. When it's off, this is the original
+        // single insertion of the fully-cleaned text.
+        let twoPhase = settings.twoPhaseDeliveryEnabled && mode != .raw && settings.cleanupStrength != .off
+        let firstPass = twoPhase
+            ? try await cleanup.deterministicClean(raw, context: context)
+            : try await cleanup.clean(raw, context: context)
 
         // Re-verify destination immediately before insertion.
         let current = activeApp.captureSnapshot()
@@ -199,21 +226,25 @@ public actor DictationController {
         )
 
         // Deliver text.
+        var clean = firstPass
         let outcome: InsertionOutcome
         if plan.willInsert {
             // Focus the intended destination app before pasting, in case focus
             // drifted (e.g. to VoiceFlow) during transcription.
             inserter.prepareForInsertion(intoBundleIdentifier: current.bundleIdentifier)
             do {
-                outcome = try inserter.insert(clean, using: plan.strategy)
+                outcome = try inserter.insert(firstPass, using: plan.strategy)
             } catch {
                 // Graceful degradation: fall back to copy-only.
-                inserter.copyToClipboard(clean)
+                inserter.copyToClipboard(firstPass)
                 outcome = InsertionOutcome(strategy: .copyOnly, didInsert: false,
                                            note: "Insertion failed; copied to clipboard. (\(error.localizedDescription))")
             }
+            if twoPhase, outcome.didInsert {
+                clean = await refineInPlace(raw: raw, delivered: firstPass, context: context)
+            }
         } else {
-            inserter.copyToClipboard(clean)
+            inserter.copyToClipboard(firstPass)
             outcome = InsertionOutcome(strategy: .copyOnly, didInsert: false, note: plan.note)
         }
 
@@ -240,5 +271,22 @@ public actor DictationController {
         }
 
         return DictationResult(record: record, plan: plan, outcome: outcome)
+    }
+
+    /// Second phase of two-phase delivery: run the full cleanup and, only if it
+    /// changed something, ask the inserter to swap the delivered text in place.
+    /// Returns whatever text is actually in the field afterwards — a refusal
+    /// (user typed, focus moved, field unreadable) simply keeps phase one, which
+    /// is already correct text, never a half-applied edit.
+    private func refineInPlace(
+        raw: String, delivered: String, context: CleanupContext
+    ) async -> String {
+        guard let refined = try? await cleanup.clean(raw, context: context),
+              !refined.isEmpty, refined != delivered else { return delivered }
+        guard inserter.replaceLastInsertion(with: refined) else {
+            Log.cleanup.notice("Two-phase refine declined — keeping the delivered text")
+            return delivered
+        }
+        return refined
     }
 }
