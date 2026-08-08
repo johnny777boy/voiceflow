@@ -83,9 +83,39 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         return result.sorted()
     }
 
+    /// Encode the per-dictation context into Whisper `promptTokens`.
+    ///
+    /// WhisperKit prefixes these with `<|startofprev|>`, i.e. Whisper treats them
+    /// as "text that preceded this audio" — the documented way to bias decoding
+    /// toward names and jargon. Two hard rules, both enforced here as well as by
+    /// WhisperKit: only non-special tokens may be fed (a special token would
+    /// hijack the decoder's task/language prefill), and the prompt must stay far
+    /// below half the 448-token context so it can never crowd out the audio.
+    ///
+    /// Biasing changes *probabilities*, never the vocabulary: Whisper can still
+    /// emit any word, so a prompt cannot put a word in the user's mouth.
+    private static func promptTokens(
+        for context: VoiceFlowCore.TranscriptionContext,
+        tokenizer: any WhisperTokenizer,
+        maxTokens: Int = 180
+    ) -> [Int]? {
+        let text = context.promptText()
+        guard !text.isEmpty else { return nil }
+        let specialBegin = tokenizer.specialTokens.specialTokenBegin
+        let tokens = tokenizer.encode(text: text).filter { $0 < specialBegin }
+        guard !tokens.isEmpty else { return nil }
+        return Array(tokens.prefix(maxTokens))
+    }
+
     func requestPermission() async -> Bool { true }   // mic handled by the recorder
 
     func transcribe(_ audio: AudioCapture, languageCode: String) async throws -> VoiceFlowCore.TranscriptionResult {
+        try await transcribe(audio, languageCode: languageCode, context: .empty)
+    }
+
+    func transcribe(
+        _ audio: AudioCapture, languageCode: String, context: VoiceFlowCore.TranscriptionContext
+    ) async throws -> VoiceFlowCore.TranscriptionResult {
         guard let (wk, suppress) = currentPipeline() else {
             throw VoiceFlowError.audioEngineFailure("Whisper model not ready.")
         }
@@ -143,6 +173,20 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         options.withoutTimestamps = true
         options.wordTimestamps = false
         options.chunkingStrategy = ChunkingStrategy.none
+
+        // Context biasing: the user's vocabulary + proper nouns read off the
+        // frontmost window. Verified against the pinned WhisperKit 0.18.0
+        // (TextDecoder.prefillDecoderInputs): prompt tokens are prefixed with
+        // startOfPreviousToken, filtered below specialTokenBegin, and the prefill
+        // KV-cache is bypassed whenever promptTokens is set — the PR #514
+        // behavior this feature depends on.
+        if let tokenizer = wk.tokenizer,
+           let prompt = Self.promptTokens(for: context, tokenizer: tokenizer) {
+            options.promptTokens = prompt
+            options.usePrefillPrompt = true
+            // Terms come from the user's screen: count in the clear, contents private.
+            Log.transcription.notice("Whisper context bias: \(context.orderedTerms.count, privacy: .public) terms, \(prompt.count, privacy: .public) tokens — \(context.promptText(), privacy: .private)")
+        }
 
         let results = try await wk.transcribe(audioArray: samples, decodeOptions: options)
         let text = results.map { $0.text }.joined(separator: " ")

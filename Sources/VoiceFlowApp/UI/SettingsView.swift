@@ -95,6 +95,10 @@ struct SettingsView: View {
             Text("Uses on-device Whisper instead of Apple's engine — noticeably better for accents/non-native English, ~1–2s slower. Turning it on downloads the model (~1 GB) in the background; dictation keeps working on Apple's engine and switches to Whisper automatically when it's ready. Audio never leaves your Mac.")
                 .font(.caption).foregroundStyle(.secondary)
             Divider()
+            Toggle("Learn names from the screen", isOn: $draft.screenContextEnabled)
+            Text("Reads the text of the window you're dictating into (via Accessibility — never a screenshot, never uploaded) and biases the recognizer toward the names on it, so people and product names come out spelled right. The text is used for that one dictation and discarded; password fields and password managers are never read.")
+                .font(.caption).foregroundStyle(.secondary)
+            Divider()
             Toggle("Use AI cleanup (requires API key)", isOn: $draft.useLLMCleanup)
             SecureField("Anthropic API key", text: $apiKey)
                 .onSubmit { if apiKey != "••••••••" { coordinator.setAPIKey(apiKey) } }

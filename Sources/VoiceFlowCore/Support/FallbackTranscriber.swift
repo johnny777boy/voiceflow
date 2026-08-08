@@ -32,9 +32,15 @@ public final class FallbackTranscriber: Transcribing, @unchecked Sendable {
     }
 
     public func transcribe(_ audio: AudioCapture, languageCode: String) async throws -> TranscriptionResult {
+        try await transcribe(audio, languageCode: languageCode, context: .empty)
+    }
+
+    public func transcribe(
+        _ audio: AudioCapture, languageCode: String, context: TranscriptionContext
+    ) async throws -> TranscriptionResult {
         if usePreferred() {
             do {
-                return try await preferred.transcribe(audio, languageCode: languageCode)
+                return try await preferred.transcribe(audio, languageCode: languageCode, context: context)
             } catch is CancellationError {
                 throw CancellationError()   // a cancelled dictation must stay cancelled
             } catch {
@@ -46,7 +52,7 @@ public final class FallbackTranscriber: Transcribing, @unchecked Sendable {
                 onFallback?(String(describing: error))
             }
         }
-        return try await fallback.transcribe(audio, languageCode: languageCode)
+        return try await fallback.transcribe(audio, languageCode: languageCode, context: context)
     }
 
     public func requestPermission() async -> Bool {

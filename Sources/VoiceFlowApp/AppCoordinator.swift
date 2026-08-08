@@ -129,7 +129,8 @@ final class AppCoordinator: ObservableObject {
             inserter: AccessibilityTextInserter(),
             activeApp: WorkspaceActiveAppProvider(),
             history: store,
-            settings: loaded
+            settings: loaded,
+            screenContext: AXScreenContextProvider()
         )
     }
 

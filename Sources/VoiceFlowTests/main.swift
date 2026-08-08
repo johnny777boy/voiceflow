@@ -20,5 +20,6 @@ runHotkeyTests(suite)
 runControllerTests(suite)
 runFallbackTranscriberTests(suite)
 runVerbatimTests(suite)
+runContextBiasTests(suite)
 
 suite.finish()

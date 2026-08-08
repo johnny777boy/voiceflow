@@ -16,6 +16,21 @@ public struct TranscriptionResult: Sendable, Equatable {
 public protocol Transcribing: AnyObject, Sendable {
     /// Transcribe captured audio into text for the given BCP-47 language.
     func transcribe(_ audio: AudioCapture, languageCode: String) async throws -> TranscriptionResult
+    /// Transcribe with per-dictation recognition context (vocabulary + on-screen
+    /// proper nouns) to bias decoding. Engines that can't use context inherit the
+    /// default implementation, which simply ignores it — so adding context can
+    /// never change the behavior of an engine that doesn't support it.
+    func transcribe(
+        _ audio: AudioCapture, languageCode: String, context: TranscriptionContext
+    ) async throws -> TranscriptionResult
     /// Request speech-recognition authorization; returns whether granted.
     func requestPermission() async -> Bool
+}
+
+public extension Transcribing {
+    func transcribe(
+        _ audio: AudioCapture, languageCode: String, context: TranscriptionContext
+    ) async throws -> TranscriptionResult {
+        try await transcribe(audio, languageCode: languageCode)
+    }
 }

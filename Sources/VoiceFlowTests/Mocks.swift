@@ -42,13 +42,37 @@ final class MockTranscriber: Transcribing, @unchecked Sendable {
     var resultToReturn = TranscriptionResult(text: "hello world")
     var error: Error?
     private(set) var lastLanguage: String?
+    private(set) var lastContext: TranscriptionContext?
 
     func transcribe(_ audio: AudioCapture, languageCode: String) async throws -> TranscriptionResult {
+        try await transcribe(audio, languageCode: languageCode, context: .empty)
+    }
+    func transcribe(
+        _ audio: AudioCapture, languageCode: String, context: TranscriptionContext
+    ) async throws -> TranscriptionResult {
         lastLanguage = languageCode
+        lastContext = context
         if let error { throw error }
         return resultToReturn
     }
     func requestPermission() async -> Bool { permissionGranted }
+}
+
+/// Stands in for the Accessibility screen reader. `delay` simulates an app that
+/// is slow to answer AX queries, so the controller's no-wait rule can be tested.
+final class MockScreenContextProvider: ScreenContextProviding, @unchecked Sendable {
+    var text: String?
+    var delay: TimeInterval
+
+    init(text: String? = nil, delay: TimeInterval = 0) {
+        self.text = text
+        self.delay = delay
+    }
+
+    func frontmostWindowText() -> String? {
+        if delay > 0 { Thread.sleep(forTimeInterval: delay) }
+        return text
+    }
 }
 
 final class MockTextInserter: TextInserting, @unchecked Sendable {

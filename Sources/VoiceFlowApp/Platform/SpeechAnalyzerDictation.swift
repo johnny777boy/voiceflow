@@ -171,6 +171,23 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
     }
 
     func transcribe(_ audio: AudioCapture, languageCode: String) async throws -> TranscriptionResult {
+        try await transcribe(audio, languageCode: languageCode, extraTerms: [])
+    }
+
+    /// Context-biased variant. Apple's `contextualStrings` are weakly honored by
+    /// SpeechTranscriber (see docs/WISPR_GAP_FINDINGS.md), so the on-screen terms
+    /// mostly earn their keep through the n-best re-ranking below — which is
+    /// deterministic and can only ever pick between candidates the model already
+    /// produced.
+    func transcribe(
+        _ audio: AudioCapture, languageCode: String, context: TranscriptionContext
+    ) async throws -> TranscriptionResult {
+        try await transcribe(audio, languageCode: languageCode, extraTerms: context.orderedTerms)
+    }
+
+    private func transcribe(
+        _ audio: AudioCapture, languageCode: String, extraTerms: [String]
+    ) async throws -> TranscriptionResult {
         guard let url = takeFileURL() else { throw VoiceFlowError.emptyTranscript }
         defer { try? FileManager.default.removeItem(at: url) }
 
@@ -193,7 +210,9 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
 
         // Bias recognition toward the user's names/terms/jargon. This was declared
         // but silently dropped — the single highest-value accuracy fix.
-        let terms = contextualStrings
+        var terms = contextualStrings
+        for term in extraTerms where !terms.contains(term) { terms.append(term) }
+        terms = Array(terms.prefix(150))
         if !terms.isEmpty {
             let context = AnalysisContext()
             context.contextualStrings = [.general: terms]

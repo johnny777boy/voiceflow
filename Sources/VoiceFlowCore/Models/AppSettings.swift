@@ -32,6 +32,10 @@ public struct AppSettings: Codable, Sendable, Equatable {
     /// Convert spoken punctuation words ("period" → "."). OFF by default: the
     /// blind word→symbol mapping destroys those words used as ordinary nouns.
     public var spokenPunctuationEnabled: Bool
+    /// Bias the recognizer with proper nouns read from the frontmost window via
+    /// Accessibility (never screenshots, never uploaded). On by default: it is
+    /// the accuracy lever that makes names/jargon transcribe correctly.
+    public var screenContextEnabled: Bool
 
     public init(
         microphoneDeviceID: String? = nil,
@@ -47,7 +51,8 @@ public struct AppSettings: Codable, Sendable, Equatable {
         launchAtLogin: Bool = false,
         useLLMCleanup: Bool = true,
         privacyRedactionEnabled: Bool = false,
-        spokenPunctuationEnabled: Bool = false
+        spokenPunctuationEnabled: Bool = false,
+        screenContextEnabled: Bool = true
     ) {
         self.microphoneDeviceID = microphoneDeviceID
         self.hotkey = hotkey
@@ -63,6 +68,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
         self.useLLMCleanup = useLLMCleanup
         self.privacyRedactionEnabled = privacyRedactionEnabled
         self.spokenPunctuationEnabled = spokenPunctuationEnabled
+        self.screenContextEnabled = screenContextEnabled
     }
 
     /// Backward-compatible decoding: settings.json written by older builds lacks
@@ -85,6 +91,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
         useLLMCleanup = try c.decodeIfPresent(Bool.self, forKey: .useLLMCleanup) ?? d.useLLMCleanup
         privacyRedactionEnabled = try c.decodeIfPresent(Bool.self, forKey: .privacyRedactionEnabled) ?? d.privacyRedactionEnabled
         spokenPunctuationEnabled = try c.decodeIfPresent(Bool.self, forKey: .spokenPunctuationEnabled) ?? d.spokenPunctuationEnabled
+        screenContextEnabled = try c.decodeIfPresent(Bool.self, forKey: .screenContextEnabled) ?? d.screenContextEnabled
     }
 
     public static let `default` = AppSettings()
