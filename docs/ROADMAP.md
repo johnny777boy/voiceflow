@@ -63,7 +63,42 @@ English remains primary. Whisper large-v3 already supports Hebrew; scope:
 language toggle UI, per-language decode options, RTL insertion correctness,
 cleanup rules for Hebrew, benchmark set. Do NOT start before Phases 1–3 ship.
 
+## Market research findings (2026-08-08 agent sweep — competitor pages, HN, reviews)
+
+**Sellable-v1 bar** (absences that show up in refund requests): multi-language,
+auto-learned vocabulary, toggle-mode activation, snippets, sub-1s felt latency,
+one-time price ($29–49 — the VoiceInk/MacWhisper shape converts the
+subscription-fatigued buyer).
+
+**⚠️ Policy tension to decide (Yoni):** research says **multi-language is table
+stakes** — every paid competitor ships 100+ languages, and Whisper already knows
+them (weight S–M: mostly language-picker UI + cleanup-prompt awareness). Current
+policy is English-only now, Hebrew secondary later. If selling is near-term,
+consider pulling a basic language picker forward; policy stands until Yoni says
+otherwise.
+
+**Cheap table-stakes wins to slot into phases:** toggle-mode + configurable
+hotkey UI (model already has isPushToTalk — mostly Settings UI; RSI/accessibility
+buyers are motivated payers); snippets/text-shortcuts (S); live partial text in
+the pill while transcribing (most of streaming's felt value, without streaming).
+
+**Positioning (evidence-backed):** Wispr's screenshot-to-cloud privacy scandal +
+2.7/5 Trustpilot + $144/yr = our headline: same job, entirely on your Mac,
+one-time price, context awareness via Accessibility only — never screenshots,
+never cloud. VoiceFlow's verbatim guard is genuinely rare in the category.
+
+**Confirmed phase bets:** context awareness (Phase 1) is "the current
+battleground" per practitioner reviews; raw accuracy is commoditizing; per-app
+tone profiles (parking lot) are the power-user retention driver; Superwhisper's
+weakness is complexity + slow support — responsive-indie positioning wins.
+
 ## Parking lot (from reviews/research; grab when adjacent)
+- Toggle-mode & hotkey options UI · snippets · live partials in pill (research:
+  table stakes) — slot into Phases 2–3 branches when adjacent.
+- Voice edit commands ("actually, make that 6pm") — opt-in cleanup level ONLY
+  (conflicts with verbatim guard by design). File/drag transcription (reuses the
+  whole Whisper stack). BYO model / Parakeet endpoint (evangelist bait).
+- Per-app tone profiles (formal email / casual chat) — same formatting, tone only.
 - Deferred review findings: BACKLOG.md §1c (sharesStem cap, variant-cache check,
   hide Whisper toggle pre-macOS 26, level micro-race, .incomplete cleanup, etc.)
 - Calmer "Didn't catch anything" pill message for vetoed silence (replaces
