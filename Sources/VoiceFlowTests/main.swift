@@ -21,5 +21,6 @@ runControllerTests(suite)
 runFallbackTranscriberTests(suite)
 runVerbatimTests(suite)
 runContextBiasTests(suite)
+runMetricsTests(suite)
 
 suite.finish()

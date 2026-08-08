@@ -165,6 +165,9 @@ public actor DictationController {
         pendingSnapshot = nil
 
         let capture = try audio.stopRecording()
+        // Everything after this point is the number the user actually feels:
+        // key released → text in the field. Hold time is deliberately excluded.
+        let releasedAt = time.now()
 
         // Transcribe, biased toward the user's vocabulary + the names on screen.
         let recognitionContext = await makeTranscriptionContext()
@@ -214,7 +217,10 @@ public actor DictationController {
             outcome = InsertionOutcome(strategy: .copyOnly, didInsert: false, note: plan.note)
         }
 
-        let latency = max(0, time.now() - recordStartTime)
+        let completedAt = time.now()
+        let latency = max(0, completedAt - recordStartTime)
+        let insertLatency = max(0, completedAt - releasedAt)
+        Log.transcription.notice("Dictation delivered in \(insertLatency, privacy: .public)s after release (\(latency, privacy: .public)s including hold)")
         let record = TranscriptRecord(
             rawText: raw,
             cleanText: clean,
@@ -223,6 +229,7 @@ public actor DictationController {
             mode: mode,
             insertionStrategy: outcome.strategy,
             latencySeconds: latency,
+            insertLatencySeconds: insertLatency,
             errorMessage: outcome.note ?? plan.note,
             createdAt: time.date()
         )

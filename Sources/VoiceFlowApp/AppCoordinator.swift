@@ -17,6 +17,8 @@ final class AppCoordinator: ObservableObject {
     @Published private(set) var statusText = "Ready"
     @Published private(set) var lastResult: DictationResult?
     @Published private(set) var recentRecords: [TranscriptRecord] = []
+    /// Median release-to-insert latency + zero-edit rate over recent dictations.
+    @Published private(set) var stats: DictationStats = .empty
     @Published private(set) var accessibilityGranted = false
     @Published private(set) var microphoneGranted = false
     @Published private(set) var speechGranted = false
@@ -404,7 +406,9 @@ final class AppCoordinator: ObservableObject {
     }
 
     func refreshHistory() {
-        recentRecords = (try? history.allRecords())?.prefix(20).map { $0 } ?? []
+        let all = (try? history.allRecords()) ?? []
+        recentRecords = all.prefix(20).map { $0 }
+        stats = DictationStats.summarize(all)
     }
 
     func deleteHistory(_ id: UUID) {
