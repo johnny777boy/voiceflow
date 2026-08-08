@@ -125,7 +125,13 @@ final class WhisperModelManager: ObservableObject {
                     downloadBase: Self.downloadBase(),
                     progressCallback: onProgress
                 )
-                UserDefaults.standard.set(folder.path, forKey: Self.modelFolderDefaultsKey)
+                // CRITICAL ordering: HubApi.snapshot RETURNS the partial folder
+                // (instead of throwing) when cancelled between files — so a
+                // cancellation check must run before anything trusts `folder`,
+                // and the folder path is persisted ONLY after the pipeline
+                // below loads successfully. Persisting here once wedged the
+                // feature permanently on a half-downloaded model.
+                try Task.checkCancellation()
                 Log.transcription.notice("Whisper model downloaded to \(folder.path, privacy: .public)")
             }
             guard isCurrent(gen) else { return }
@@ -146,6 +152,8 @@ final class WhisperModelManager: ObservableObject {
             guard isCurrent(gen) else { return }
             try Task.checkCancellation()
             transcriber.adopt(pipeline)
+            // Only a folder that produced a WORKING pipeline is remembered.
+            UserDefaults.standard.set(folder.path, forKey: Self.modelFolderDefaultsKey)
             state = .ready
             Log.transcription.notice("Whisper ready — high-accuracy engine active")
         } catch {
@@ -154,6 +162,10 @@ final class WhisperModelManager: ObservableObject {
             if Self.isCancellation(error) {
                 state = .idle
             } else {
+                // Forget a cached folder that failed to load (corrupt/partial):
+                // the next attempt re-runs the download, which cheaply resumes/
+                // verifies existing files instead of retrying a doomed load.
+                UserDefaults.standard.removeObject(forKey: Self.modelFolderDefaultsKey)
                 let message = (error as NSError).localizedDescription
                 Log.transcription.error("Whisper setup failed: \(String(describing: error), privacy: .public)")
                 state = .failed(message)
