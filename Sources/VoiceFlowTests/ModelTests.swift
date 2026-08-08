@@ -23,11 +23,20 @@ func runModelTests(_ s: TestSuite) {
         s.expect(a.matches(b))
     }
 
-    s.test("Settings resolves per-app mode") { s in
+    s.test("Settings resolves per-app mode — uniform formatting everywhere") { s in
         let settings = AppSettings.default
+        // CONSISTENCY RULE (2026-08-08): same speech → same text in every app.
+        // Mail gets Email mode (same formatting + paragraphs); everything else,
+        // terminals and chat apps included, gets Clean Writing by default.
         s.expectEqual(settings.mode(forBundleIdentifier: "com.apple.mail"), .email)
-        s.expectEqual(settings.mode(forBundleIdentifier: "com.apple.Terminal"), .claudeCode)
+        s.expectEqual(settings.mode(forBundleIdentifier: "com.apple.Terminal"), .cleanWriting)
+        s.expectEqual(settings.mode(forBundleIdentifier: "com.anthropic.claudefordesktop"), .cleanWriting)
         s.expectEqual(settings.mode(forBundleIdentifier: "com.unknown.app"), .cleanWriting)
+        // Code mode is reachable only via an explicit user-set rule.
+        var custom = settings
+        custom.perAppBehaviors.append(PerAppBehavior(
+            bundleIdentifier: "com.apple.Terminal", appName: "Terminal", defaultMode: .claudeCode))
+        s.expectEqual(custom.mode(forBundleIdentifier: "com.apple.Terminal"), .claudeCode)
     }
 
     s.test("Settings round-trips through JSON") { s in

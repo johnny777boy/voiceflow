@@ -199,8 +199,11 @@ func runCleanupTests(_ s: TestSuite) {
     }
 
     s.test("Auto mode picks the best mode per app") { s in
-        s.expectEqual(AppSettings.autoMode(forBundleIdentifier: "com.apple.Terminal"), .claudeCode)
-        s.expectEqual(AppSettings.autoMode(forBundleIdentifier: "com.microsoft.VSCode"), .claudeCode)
+        // CONSISTENCY RULE (2026-08-08): uniform formatting in every text box —
+        // terminals/editors included. Only mail differs (same formatting +
+        // paragraph preservation). Code mode = explicit per-app rule only.
+        s.expectEqual(AppSettings.autoMode(forBundleIdentifier: "com.apple.Terminal"), .cleanWriting)
+        s.expectEqual(AppSettings.autoMode(forBundleIdentifier: "com.microsoft.VSCode"), .cleanWriting)
         s.expectEqual(AppSettings.autoMode(forBundleIdentifier: "com.apple.mail"), .email)
         s.expectEqual(AppSettings.autoMode(forBundleIdentifier: "com.tinyspeck.slackmacgap"), .cleanWriting)
         s.expectEqual(AppSettings.autoMode(forBundleIdentifier: "com.apple.Notes"), .cleanWriting)

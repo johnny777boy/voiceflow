@@ -24,7 +24,14 @@ private func makeController(
 
 func runControllerTests(_ s: TestSuite) {
     s.test("Full pipeline inserts via accessibility and records history") { s in
-        let (controller, inserter, history, _, clock) = makeController(transcript: "git status")
+        // Code mode is now reached ONLY via an explicit user-set per-app rule
+        // (uniform-formatting policy, 2026-08-08) — this test sets one so the
+        // literal-tokens pipeline stays covered.
+        var settings = AppSettings.default
+        settings.perAppBehaviors.append(PerAppBehavior(
+            bundleIdentifier: MockActiveAppProvider.terminal().bundleIdentifier ?? "com.apple.Terminal",
+            appName: "Terminal", defaultMode: .claudeCode))
+        let (controller, inserter, history, _, clock) = makeController(transcript: "git status", settings: settings)
         let result = blockingAwait { () -> DictationResult? in
             try? await controller.beginRecording()
             clock.advance(by: 1.5)
