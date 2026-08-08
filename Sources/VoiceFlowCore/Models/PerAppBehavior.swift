@@ -28,10 +28,17 @@ public struct PerAppBehavior: Codable, Sendable, Equatable, Hashable, Identifiab
 
 public extension PerAppBehavior {
     /// Sensible per-app defaults mapping the spec's primary targets to modes.
+    ///
+    /// CONSISTENCY RULE (user decision 2026-08-08): dictation formats the same
+    /// everywhere — full sentences, capitals, punctuation. Code mode is reserved
+    /// for surfaces where formatting literally breaks input (terminals, code
+    /// editors). Chat apps — including AI chat like Claude — are prose.
     static let defaults: [PerAppBehavior] = [
-        // Coding assistants & terminals → Claude Code mode.
-        PerAppBehavior(bundleIdentifier: "com.anthropic.claudefordesktop", appName: "Claude", defaultMode: .claudeCode),
-        PerAppBehavior(bundleIdentifier: "com.todesktop.230313mzl4w4u92", appName: "Claude Code", defaultMode: .claudeCode),
+        // AI chat → prose, same as any messenger.
+        PerAppBehavior(bundleIdentifier: "com.anthropic.claudefordesktop", appName: "Claude", defaultMode: .cleanWriting),
+        // True code surfaces → Claude Code mode (a capital or trailing period
+        // corrupts commands/identifiers there).
+        PerAppBehavior(bundleIdentifier: "com.todesktop.230313mzl4w4u92", appName: "Cursor", defaultMode: .claudeCode),
         PerAppBehavior(bundleIdentifier: "com.microsoft.VSCode", appName: "VS Code", defaultMode: .claudeCode),
         PerAppBehavior(bundleIdentifier: "com.apple.Terminal", appName: "Terminal", defaultMode: .claudeCode),
         PerAppBehavior(bundleIdentifier: "com.googlecode.iterm2", appName: "iTerm2", defaultMode: .claudeCode),
