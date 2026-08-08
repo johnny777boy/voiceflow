@@ -104,6 +104,16 @@ func runVerbatimTests(_ s: TestSuite) {
         s.expectEqual(migrated.mode(forBundleIdentifier: "com.mycompany.tool"), .claudeCode)
     }
 
+    s.test("CleanupGuard: 1-char exemption is contraction-shards ONLY (Codex finding)") { s in
+        // A bare invented "I"/"a" must be rejected — the shard exemption applies
+        // only to letters that literally follow an apostrophe in the cleaned text.
+        s.expectFalse(CleanupGuard.preservesMeaning(original: "go now", cleaned: "I go now"))
+        s.expectFalse(CleanupGuard.preservesMeaning(original: "send report", cleaned: "send a report"))
+        // Real contraction shards still pass, straight or curly apostrophe.
+        s.expect(CleanupGuard.preservesMeaning(original: "do not touch it", cleaned: "Don't touch it."))
+        s.expect(CleanupGuard.preservesMeaning(original: "it is fine", cleaned: "It\u{2019}s fine."))
+    }
+
     s.test("CleanupGuard rejects invented numbers (both directions exact)") { s in
         s.expectFalse(CleanupGuard.preservesMeaning(
             original: "send the report", cleaned: "send the 2 reports"))

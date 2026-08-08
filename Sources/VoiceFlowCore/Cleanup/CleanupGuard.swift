@@ -40,8 +40,12 @@ public enum CleanupGuard {
         //        an original word ("go"→"going", "discuss"→"discussing").
         let originalWords = allWords(original)
         let originalSet = Set(originalWords)
+        // Only tokens that literally follow an apostrophe in the cleaned text
+        // ("don't" → shard "t") are contraction shards — a blanket 1-char pass
+        // would let cleanup invent "I"/"a" (Codex verification finding).
+        let shards = contractionShards(cleaned)
         for word in allWords(cleaned) where !originalSet.contains(word) {
-            if word.count == 1 { continue }                    // contraction shards ("don't" → "don","t")
+            if shards.contains(word) { continue }              // "don't" → "don","t"
             if word.allSatisfy({ $0.isNumber }) { continue }   // digit sets equal per step 3
             if !sharesStem(word, withAnyOf: originalWords) { return false }
         }
@@ -81,6 +85,24 @@ public enum CleanupGuard {
         text.lowercased()
             .split { !($0.isLetter || $0.isNumber) }
             .map(String.init)
+    }
+
+    /// Letter-runs that immediately follow an apostrophe (' or ’) after a letter
+    /// — the fragments produced when `allWords` splits a contraction: "don't" →
+    /// "t", "we'll" → "ll", "it's" → "s". Only these may appear as "new" words.
+    static func contractionShards(_ text: String) -> Set<String> {
+        var shards = Set<String>()
+        let lower = Array(text.lowercased())
+        for i in lower.indices where lower[i] == "'" || lower[i] == "\u{2019}" {
+            guard i > lower.startIndex, lower[i - 1].isLetter else { continue }
+            var j = i + 1
+            var shard = ""
+            while j < lower.endIndex, lower[j].isLetter {
+                shard.append(lower[j]); j += 1
+            }
+            if !shard.isEmpty { shards.insert(shard) }
+        }
+        return shards
     }
 
     // MARK: - Helpers
