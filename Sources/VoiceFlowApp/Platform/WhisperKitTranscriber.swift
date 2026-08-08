@@ -162,7 +162,15 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         // This cannot eat real speech — a real "Thank you" passes the re-check.
         let clipSeconds = Double(samples.count) / 16_000.0
         let minLogProb = results.flatMap { $0.segments }.map { $0.avgLogprob }.min()
-        if TranscriptSanity.isPhantomPhrase(text) {
+        // Suspicious = a known phantom phrase at any length, OR any tiny output
+        // from a short clip (live evidence 2026-08-08: a 2s silent hold decoded
+        // to just "Thank" — not on any list — which cleanup then completed to
+        // "Thank you."). Short real utterances ("yes", "okay send it") are safe:
+        // the arbiter hears them and approves.
+        let wordCount = text.split(whereSeparator: { $0 == " " }).count
+        let suspicious = TranscriptSanity.isPhantomPhrase(text)
+            || (clipSeconds <= 3.0 && wordCount <= 4)
+        if suspicious {
             Log.transcription.notice("Whisper phantom candidate \"\(text, privacy: .public)\" (dur=\(clipSeconds, privacy: .public)s logProb=\(minLogProb ?? 0, privacy: .public) maxRMS=\(maxChunkRMS, privacy: .public)) — asking arbiter")
             if let arbiter = silenceArbiter {
                 do {
