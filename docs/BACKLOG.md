@@ -57,11 +57,27 @@ accent, and even Wispr slips on them:
    ceiling via UserDefaults `whisperModelVariant` = `openai_whisper-large-v3_turbo`
    (FULL large-v3, ~1 WER better on accents, slower). Keep Whisper only if
    measurably better. Plan: `docs/superpowers/specs/2026-08-07-voiceflow-whisper-parity-plan.md`.
-1b. **Fix self-inflicted word errors** (from WISPR_GAP_FINDINGS.md, all cheap):
-   spoken-punctuation replacements destroy literal "period"/"comma" (on by
-   default); Raw mode isn't raw (VocabularyReplacer runs first — corrupts WER
-   benchmarks); rawText stored but never shown in history; CleanupGuard missing
-   on the Anthropic provider path. Do these BEFORE trusting any WER numbers.
+1b. **DONE on branch (commit b43b0db)** — verbatim-fidelity pass: true Raw mode,
+   spoken punctuation opt-in, filler/guard fixes, Whisper anti-hallucination.
+   Only "show rawText in history" remains open from this list.
+1c. **Deferred review findings** (2026-08-08 merge verification, two reviewer
+   agents; all non-blocking, recorded for later):
+   - Whisper path ignores user vocabulary (promptTokens biasing — plan item that
+     didn't ship; verify WhisperKit PR#514 first). Asymmetric vs Apple path.
+   - whisperModelVariant override doesn't invalidate the cached folder of the
+     old variant (dev-only A/B footgun) — add folder-matches-variant check.
+   - CleanupGuard.sharesStem false-accepts prefix supersets ("there"→"therefore");
+     add max-length-ratio cap.
+   - Mic level micro-race can leave audioLevel stuck nonzero after stop
+     (invisible today; fix = decide-and-emit under lock).
+   - Hotkey rebuild during an active hold swallows the release (wake-while-
+     holding only; fix = emit .released from unregister when chord was down).
+   - Hide the Whisper toggle on macOS < 26 (LiveSpeechDictation has no fileURL —
+     toggle downloads 1GB then silently falls back every dictation).
+   - Cancelled downloads leave bounded ~1GB .incomplete files in App Support.
+   - Consider moving capture-file deletion ownership to the controller (today:
+     Whisper deletes on success; Apple's stale fileURL is a benign dangling ref).
+   - WhisperModelManager state-machine unit tests (needs injectable manager).
 2. **(Optional) Noise suppression / voice-processing IO** on the mic input — untested
    audio lever that helps short-word clarity. HIGH-RISK (touches capture); test live.
    Plan: `docs/superpowers/specs/2026-08-06-voiceflow-transcription-accuracy-plan.md`.
