@@ -3,7 +3,55 @@
 Last updated: 2026-08-08 (late session). Read CLAUDE.md first (workflow ritual +
 product principles), then this, then docs/ROADMAP.md (phased plan to sellable).
 
-## 🤖 AUTONOMOUS RUN — approved by Yoni 2026-08-08 (execute on resume)
+## ✅ AUTONOMOUS RUN COMPLETE (2026-08-08 night) — awaiting Yoni's Codex PASS
+
+Phases 1–5 are built, reviewed, fixed, and INSTALLED. `feature/upgrades-phase1-5`
+head `539465b`. 172 tests, 0 warnings (debug + release). App built from the branch
+and installed to `/Applications/VoiceFlow.app` (relaunched, running).
+
+**Yoni's next actions, in order:**
+1. **Live-test the installed build** — it is the branch, not main. Rollback if
+   anything is wrong: `git checkout main && bash Scripts/build_app.sh release &&
+   ditto dist/VoiceFlow.app /Applications/VoiceFlow.app`.
+2. **Paste `docs/CODEX-BRIEF-UPGRADES.md` into Codex** and bring back the verdict.
+3. On PASS: merge ritual per CLAUDE.md §5 (tag `pre-upgrades-merge-2026-08-08`,
+   `git merge --no-ff`, tests on the merge, tag `verified-2026-08-08-upgrades`,
+   push with tags, rebuild+reinstall from main).
+4. **Then: the microphone idle-timeout branch** (see "Decided, not yet built").
+
+**Two reviewer agents ran on the full diff.** Both Criticals and all nine
+Importants were fixed in `539465b` (read that commit message — it is the record
+of where this code was actually dangerous). Headlines: Whisper could read its own
+bias glossary back as the transcript; Phase 5 voting was scoped to screen terms
+instead of the user's vocabulary; the AX screen read had no working timeout; and
+two-phase delivery held the dictation lock across the second LLM pass, which
+silently truncated the NEXT utterance.
+
+**Deferred, non-blocking** (both reviewers, Minor/Nit): `prewarm()` warms with
+hardcoded instructions that may not match the resolved mode; `setEditedAfterInsert`
+is a non-atomic read-modify-write that could resurrect a just-trimmed record;
+`SuggestedVocabularyStore.persist()` does small synchronous disk I/O on the main
+actor; `DictationStats` counts a <6s-old record as unedited before its correction
+window closes; the voting path normalizes whitespace when it substitutes;
+`AppCoordinator.cancel()` is unreachable dead code.
+
+## 🎤 Decided, not yet built — microphone idle-timeout (Yoni asked 2026-08-08)
+
+Yoni noticed the macOS mic indicator is on all day and asked why, since Wispr's
+only appears on press. Answer: the `AVAudioEngine` is kept warm permanently with a
+tap filling an ~0.8s pre-roll ring, so the audio from BEFORE the keypress is
+prepended and the first word isn't clipped — his own design decision, and it works.
+Measured cost on his machine: **0.1% CPU lifetime / 0.3% instantaneous, 123 MB,
+no power assertion** — so the objection is the indicator light and a little
+battery, NOT CPU load.
+
+Plan (own branch, HIS choice was "finish the current run first"): shut the engine
+down after N minutes idle, restart on key-down; stay warm during an active
+session. Risk is exactly the bug the warm mic exists to prevent — the first
+dictation after idle may clip. **Audio-capture path ⇒ CLAUDE.md rule 6: only with
+Yoni present, verified live + by WER.** Do not build it while he is asleep.
+
+## 🤖 AUTONOMOUS RUN — approved by Yoni 2026-08-08 (executed; kept for the record)
 
 Yoni's instruction: build the remaining upgrade phases AUTONOMOUSLY, verify with
 both reviewer agents, prepare the Codex brief + paste message, and STOP before
