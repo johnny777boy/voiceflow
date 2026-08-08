@@ -38,6 +38,9 @@ final class WhisperModelManager: ObservableObject {
 
     private let transcriber: WhisperKitTranscriber
     private var task: Task<Void, Never>?
+    /// Bumped on every new run and on toggle-off; stale runs check it before
+    /// every state write so they can never race a newer run (see ensureReady).
+    private var generation: UInt64 = 0
 
     init(transcriber: WhisperKitTranscriber) {
         self.transcriber = transcriber
@@ -58,6 +61,7 @@ final class WhisperModelManager: ObservableObject {
         if on {
             ensureReady()
         } else {
+            generation &+= 1        // orphan any in-flight task: its writes are ignored
             task?.cancel()
             task = nil
             transcriber.unload()
@@ -66,6 +70,7 @@ final class WhisperModelManager: ObservableObject {
     }
 
     func retry() {
+        guard Self.isEnabled else { state = .idle; return }
         state = .idle
         ensureReady()
     }
@@ -73,16 +78,31 @@ final class WhisperModelManager: ObservableObject {
     /// Idempotent: starts the pipeline exactly once; re-entry while running or
     /// after ready is a no-op. Model files land under Application Support (kept
     /// out of ~/Documents), and a completed download is reused across launches.
+    ///
+    /// Every run is stamped with a generation; toggling off bumps the generation,
+    /// so a stale task that survives cancellation (URLSession can take a moment,
+    /// and CoreML loads aren't cancellable) can never adopt a pipeline, flip
+    /// state, or clear the handle of a NEWER run. This is what makes rapid
+    /// on→off→on flapping safe (review finding, 2026-08-08).
     func ensureReady() {
+        guard Self.isEnabled else { return }
         guard task == nil, state != .ready, state != .preparing else { return }
+        generation &+= 1
+        let gen = generation
         state = Self.cachedModelFolder() == nil ? .downloading(0) : .preparing
         task = Task { [weak self] in
-            await self?.run()
-            self?.task = nil
+            await self?.run(generation: gen)
+            guard let self, self.generation == gen else { return }
+            self.task = nil
         }
     }
 
-    private func run() async {
+    /// True while `gen` is still the live run AND the feature is still on.
+    private func isCurrent(_ gen: UInt64) -> Bool {
+        generation == gen && Self.isEnabled
+    }
+
+    private func run(generation gen: UInt64) async {
         do {
             let folder: URL
             if let cached = Self.cachedModelFolder() {
@@ -93,10 +113,11 @@ final class WhisperModelManager: ObservableObject {
                 let onProgress: @Sendable (Progress) -> Void = { [weak self] progress in
                     let fraction = progress.fractionCompleted
                     Task { @MainActor [weak self] in
-                        // Only advance while still downloading (ignore late callbacks).
-                        if case .downloading = self?.state {
-                            self?.state = .downloading(fraction)
-                        }
+                        // Only advance while this run is still current and still
+                        // in the downloading phase (ignore late/stale callbacks).
+                        guard let self, self.isCurrent(gen),
+                              case .downloading = self.state else { return }
+                        self.state = .downloading(fraction)
                     }
                 }
                 folder = try await WhisperKit.download(
@@ -107,6 +128,7 @@ final class WhisperModelManager: ObservableObject {
                 UserDefaults.standard.set(folder.path, forKey: Self.modelFolderDefaultsKey)
                 Log.transcription.notice("Whisper model downloaded to \(folder.path, privacy: .public)")
             }
+            guard isCurrent(gen) else { return }
             try Task.checkCancellation()
             state = .preparing
             // prewarm keeps peak memory down during first-time Core ML
@@ -119,17 +141,33 @@ final class WhisperModelManager: ObservableObject {
                 download: false
             )
             let pipeline = try await WhisperKit(config)
+            // The load isn't cancellable — re-check before adopting so a pipeline
+            // finished after toggle-off is discarded, not retained (1.5 GB).
+            guard isCurrent(gen) else { return }
             try Task.checkCancellation()
             transcriber.adopt(pipeline)
             state = .ready
             Log.transcription.notice("Whisper ready — high-accuracy engine active")
-        } catch is CancellationError {
-            state = .idle
         } catch {
-            let message = (error as NSError).localizedDescription
-            Log.transcription.error("Whisper setup failed: \(String(describing: error), privacy: .public)")
-            state = .failed(message)
+            // A stale run reports nothing; setEnabled(false) already set .idle.
+            guard isCurrent(gen) else { return }
+            if Self.isCancellation(error) {
+                state = .idle
+            } else {
+                let message = (error as NSError).localizedDescription
+                Log.transcription.error("Whisper setup failed: \(String(describing: error), privacy: .public)")
+                state = .failed(message)
+            }
         }
+    }
+
+    /// Cancellation arrives as CancellationError from Task APIs but as
+    /// URLError(.cancelled) from URLSession-backed downloads — both mean
+    /// "the user turned it off", never a failure worth a Retry button.
+    private static func isCancellation(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+        if let urlError = error as? URLError, urlError.code == .cancelled { return true }
+        return false
     }
 
     // MARK: - Disk locations

@@ -35,6 +35,8 @@ public final class FallbackTranscriber: Transcribing, @unchecked Sendable {
         if usePreferred() {
             do {
                 return try await preferred.transcribe(audio, languageCode: languageCode)
+            } catch is CancellationError {
+                throw CancellationError()   // a cancelled dictation must stay cancelled
             } catch {
                 // The preferred engine must not consume/destroy the capture on
                 // failure (WhisperKitTranscriber deletes the file only on success),

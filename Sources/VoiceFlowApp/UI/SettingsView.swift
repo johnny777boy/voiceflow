@@ -7,7 +7,7 @@ struct SettingsView: View {
     @ObservedObject var coordinator: AppCoordinator
     @State private var draft: AppSettings
     @State private var apiKey: String = ""
-    @AppStorage("useWhisperEngine") private var useWhisper = false
+    @AppStorage(WhisperModelManager.enabledDefaultsKey) private var useWhisper = false
 
     init(coordinator: AppCoordinator) {
         self.coordinator = coordinator
