@@ -38,9 +38,11 @@ public final class FallbackTranscriber: Transcribing, @unchecked Sendable {
             } catch is CancellationError {
                 throw CancellationError()   // a cancelled dictation must stay cancelled
             } catch {
-                // The preferred engine must not consume/destroy the capture on
-                // failure (WhisperKitTranscriber deletes the file only on success),
-                // so the fallback still has everything it needs.
+                // On most failures the preferred engine leaves the capture intact
+                // (Whisper deletes the file only on success) so the fallback can
+                // re-read it. Exception: the phantom-arbiter path may have already
+                // consumed the file — the fallback then cleanly reports an empty
+                // transcript, which is the intended outcome for vetoed silence.
                 onFallback?(String(describing: error))
             }
         }

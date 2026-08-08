@@ -105,7 +105,11 @@ final class AppCoordinator: ObservableObject {
         let whisper = WhisperKitTranscriber()
         // Second opinion for Whisper's silence-hallucinations: Apple's engine
         // emits nothing on silent clips, so it can veto phantom "Thank you."s.
-        whisper.silenceArbiter = live
+        // ONLY the modern engine qualifies — the legacy streaming engine's
+        // transcribe is stateful/slow (15s poll) and unsafe to invoke twice.
+        if #available(macOS 26.0, *), live is SpeechAnalyzerDictation {
+            whisper.silenceArbiter = live
+        }
         self.whisperManager = WhisperModelManager(transcriber: whisper)
         let transcriber: Transcribing = FallbackTranscriber(
             preferred: whisper,

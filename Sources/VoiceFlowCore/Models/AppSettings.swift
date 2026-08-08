@@ -90,10 +90,10 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public static let `default` = AppSettings()
 
     /// Resolve the effective mode for a destination. Priority: an explicit per-app
-    /// rule the user set > automatic best-fit for the app > the global default.
-    /// The auto step means the right mode is chosen everywhere without the user
-    /// managing it: code/terminal apps keep tokens literal, mail keeps paragraphs,
-    /// and everything else gets polished Clean Writing.
+    /// rule the user set > automatic best-fit > the global default. Under the
+    /// uniform-formatting policy the auto step yields Email for mail apps and
+    /// Clean Writing for everything else — identical formatting everywhere;
+    /// code mode happens only when the user explicitly assigns it to an app.
     public func mode(forBundleIdentifier bundleID: String?) -> DictationMode {
         if let bundleID,
            let rule = perAppBehaviors.first(where: { $0.bundleIdentifier == bundleID }) {

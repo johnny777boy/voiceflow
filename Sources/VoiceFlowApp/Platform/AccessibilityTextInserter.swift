@@ -42,6 +42,11 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
     }
 
     func prepareForInsertion(intoBundleIdentifier bundleIdentifier: String?) {
+        // Record the target FIRST — even for the early-return cases — so the
+        // continuation memory never compares against a stale previous app.
+        memoryLock.lock()
+        preparedBundleID = bundleIdentifier
+        memoryLock.unlock()
         guard let bundleIdentifier, bundleIdentifier != VoiceFlowInfo.bundleIdentifier else { return }
         let activate: @Sendable () -> Void = {
             let ws = NSWorkspace.shared
@@ -51,9 +56,6 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
             ws.runningApplications.first { $0.bundleIdentifier == bundleIdentifier }?.activate()
         }
         if Thread.isMainThread { activate() } else { DispatchQueue.main.sync(execute: activate) }
-        memoryLock.lock()
-        preparedBundleID = bundleIdentifier
-        memoryLock.unlock()
         Thread.sleep(forTimeInterval: 0.08)   // let the target come to front
     }
 
@@ -125,11 +127,18 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
     /// The worst case of tier 2 — a stray leading space in a freshly-emptied
     /// box — is far less harmful than words gluing, and chat apps trim it on send.
     private func leadingSpaceIfNeeded() -> String {
-        if let focused = AX.focusedElement(), let before = AX.characterBeforeCaret(focused) {
-            if before.isWhitespace || before.isNewline { return "" }
-            if "([{\u{201C}\u{2018}\"'".contains(before) { return "" }   // after ( " ' etc.
-            return " "
+        if let focused = AX.focusedElement() {
+            if let before = AX.characterBeforeCaret(focused) {
+                if before.isWhitespace || before.isNewline { return "" }
+                if "([{\u{201C}\u{2018}\"'".contains(before) { return "" }   // after ( " ' etc.
+                return " "
+            }
+            // The field is READABLE but has no char before the caret (empty box,
+            // or caret at position 0): definitively no space — tier-2 memory must
+            // NOT fire here (it would indent fresh notes / prepended text).
+            if AX.string(focused, kAXValueAttribute) != nil { return "" }
         }
+        // Field genuinely unreadable (web/Electron): fall back to memory.
         memoryLock.lock(); defer { memoryLock.unlock() }
         if let at = lastInsertedAt, Date().timeIntervalSince(at) < 120,
            let last = lastInsertionBundleID, last == preparedBundleID,

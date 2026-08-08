@@ -25,9 +25,10 @@ public enum CleanupGuard {
         //    words are short. This is the critical safety check.
         if negationCount(original) != negationCount(cleaned) { return false }
 
-        // 3. Every number in the input must survive (no "$3.14" → "$4.15", no dropped
-        //    quantities/dates).
-        if !numbers(original).isSubset(of: numbers(cleaned)) { return false }
+        // 3. Numbers must match EXACTLY in both directions: none dropped
+        //    ("$3.14" → "$4.15") and none invented (cleanup may not add digits
+        //    the user never spoke).
+        if numbers(original) != numbers(cleaned) { return false }
 
         // 4. BIDIRECTIONAL verbatim check (tightened 2026-08-08 after live-use
         //    evidence: cleanup invented "you" in 'Thank'→'Thank you.' through the
@@ -41,7 +42,7 @@ public enum CleanupGuard {
         let originalSet = Set(originalWords)
         for word in allWords(cleaned) where !originalSet.contains(word) {
             if word.count == 1 { continue }                    // contraction shards ("don't" → "don","t")
-            if word.allSatisfy({ $0.isNumber }) { continue }   // digits guarded in step 3
+            if word.allSatisfy({ $0.isNumber }) { continue }   // digit sets equal per step 3
             if !sharesStem(word, withAnyOf: originalWords) { return false }
         }
 

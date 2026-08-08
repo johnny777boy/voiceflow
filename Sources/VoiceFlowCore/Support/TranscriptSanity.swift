@@ -53,6 +53,28 @@ public enum TranscriptSanity {
         phantomPhrases.contains(normalized(text))
     }
 
+    /// The subset that is essentially NEVER deliberate dictation — YouTube-outro
+    /// and subtitle-credit boilerplate. Only these justify arbitration at ANY
+    /// clip length; everyday phrases ("okay", "thank you", "bye") are legitimate
+    /// dictations when spoken deliberately over a longer clip, and are checked
+    /// only under the short-clip suspicion arm (adversarial-review finding F1:
+    /// an any-length check risked eating a real long "Thank you so much.").
+    public static let outroPhrases: Set<String> = [
+        "thanks for watching",
+        "thank you for watching",
+        "thank you so much for watching",
+        "thank you for listening",
+        "please subscribe",
+        "please like and subscribe",
+        "subtitles by the amara org community",
+        "subtitles by the amaraorg community",
+        "the end",
+    ]
+
+    public static func isOutroPhrase(_ text: String) -> Bool {
+        outroPhrases.contains(normalized(text))
+    }
+
     /// Lowercase, strip everything but letters/digits/spaces, collapse whitespace.
     public static func normalized(_ text: String) -> String {
         let lowered = text.lowercased()
