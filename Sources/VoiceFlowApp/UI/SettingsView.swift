@@ -72,6 +72,28 @@ struct SettingsView: View {
 
     private var vocabulary: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if !coordinator.vocabularySuggestions.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Learned from your corrections").font(.headline)
+                    Text("You've fixed these words the same way at least three times. Nothing changes until you add one.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    ForEach(coordinator.vocabularySuggestions) { suggestion in
+                        HStack(spacing: 8) {
+                            Text(suggestion.heard).font(.callout.monospaced())
+                            Image(systemName: "arrow.right").font(.caption2).foregroundStyle(.secondary)
+                            Text(suggestion.corrected).font(.callout.monospaced().weight(.semibold))
+                            Text("×\(suggestion.occurrences)").font(.caption2).foregroundStyle(.tertiary)
+                            Spacer()
+                            Button("Add") { coordinator.acceptSuggestion(suggestion) }
+                            Button("Dismiss") { coordinator.dismissSuggestion(suggestion) }
+                                .buttonStyle(.plain).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .padding(10)
+                .background(.tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                Divider()
+            }
             Text("Spoken → written replacements").font(.headline)
             Table(draft.vocabulary) {
                 TableColumn("Spoken") { Text($0.spoken) }

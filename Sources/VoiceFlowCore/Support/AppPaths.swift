@@ -17,4 +17,9 @@ public enum AppPaths {
     public static func settingsURL(fileManager: FileManager = .default) -> URL {
         baseDirectory(fileManager: fileManager).appendingPathComponent("settings.json")
     }
+
+    /// Corrections observed after insertion, awaiting the user's accept/dismiss.
+    public static func suggestedVocabularyURL(fileManager: FileManager = .default) -> URL {
+        baseDirectory(fileManager: fileManager).appendingPathComponent("suggested-vocabulary.json")
+    }
 }

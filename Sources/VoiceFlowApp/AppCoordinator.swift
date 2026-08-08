@@ -19,6 +19,9 @@ final class AppCoordinator: ObservableObject {
     @Published private(set) var recentRecords: [TranscriptRecord] = []
     /// Median release-to-insert latency + zero-edit rate over recent dictations.
     @Published private(set) var stats: DictationStats = .empty
+    /// Corrections the user has made repeatedly, offered for one-click accept.
+    /// Nothing here changes transcription until the user says so.
+    @Published private(set) var vocabularySuggestions: [VocabularySuggestion] = []
     @Published private(set) var accessibilityGranted = false
     @Published private(set) var microphoneGranted = false
     @Published private(set) var speechGranted = false
@@ -35,6 +38,8 @@ final class AppCoordinator: ObservableObject {
     private let history: HistoryStoring
     private let secureStore: SecureStoring
     private let overlay = OverlayController()
+    private let suggestionStore: SuggestedVocabularyStore
+    private var corrections: CorrectionWatcher?
     private var didStart = false
     /// Desired recording state, set synchronously by hotkey events. A single
     /// reconcile pass drives the *actual* recording toward this intent and
@@ -62,6 +67,7 @@ final class AppCoordinator: ObservableObject {
         self.history = store
         self.secureStore = KeychainStore()
         self.hotkeys = GlobalHotkeyManager()
+        self.suggestionStore = SuggestedVocabularyStore(url: AppPaths.suggestedVocabularyURL())
 
         // AI cleanup provider: prefer Apple's on-device model (free, private, no API
         // key) on macOS 26; otherwise the optional Anthropic provider (needs a key).
@@ -160,6 +166,20 @@ final class AppCoordinator: ObservableObject {
         Task { await requestPermissions() }
         registerHotkey()
         LoginItemManager.setEnabled(settings.launchAtLogin)
+        // Learn from what the user fixes by hand — proposals only, never silent
+        // vocabulary changes.
+        corrections = CorrectionWatcher(
+            store: suggestionStore,
+            onEdit: { [weak self] recordID, edited in
+                guard let self else { return }
+                try? self.history.setEditedAfterInsert(edited, id: recordID)
+                self.refreshHistory()
+            },
+            onSuggestion: { [weak self] _ in
+                self?.refreshSuggestions()
+            }
+        )
+        refreshSuggestions()
         refreshHistory()
         // If High Accuracy was already on, resume the model download/load now —
         // dictation stays on the Apple engine until Whisper reports ready.
@@ -309,6 +329,8 @@ final class AppCoordinator: ObservableObject {
     }
 
     private func beginRecordingTransition() async {
+        // A new dictation supersedes the previous one's correction window.
+        corrections?.cancel()
         // Gate on mic + speech permission — but only await the (possibly
         // prompting) request path when they aren't already granted. When they
         // are, we proceed synchronously so a prompt can't desync press/release.
@@ -354,6 +376,9 @@ final class AppCoordinator: ObservableObject {
             statusText = result.outcome.didInsert ? "Inserted" : (result.outcome.note ?? "Copied to clipboard")
             overlay.show(state: .done(result))
             refreshHistory()
+            if result.outcome.didInsert {
+                corrections?.watch(recordID: result.record.id, insertedText: result.record.cleanText)
+            }
         } catch {
             statusText = "Error: \(error.localizedDescription)"
             overlay.show(state: .error(statusText))
@@ -419,6 +444,33 @@ final class AppCoordinator: ObservableObject {
     func clearHistory() {
         try? history.deleteAll()
         refreshHistory()
+    }
+
+    // MARK: - Suggested vocabulary (Phase 4 — propose, never auto-apply)
+
+    func refreshSuggestions() {
+        vocabularySuggestions = suggestionStore.readySuggestions()
+    }
+
+    /// Turn a suggestion into a real vocabulary entry, at the user's request.
+    func acceptSuggestion(_ suggestion: VocabularySuggestion) {
+        var updated = settings
+        let alreadyPresent = updated.vocabulary.contains {
+            $0.spoken.caseInsensitiveCompare(suggestion.heard) == .orderedSame
+                && $0.written == suggestion.corrected
+        }
+        if !alreadyPresent {
+            updated.vocabulary.append(VocabularyEntry(spoken: suggestion.heard, written: suggestion.corrected))
+            applySettings(updated)
+        }
+        suggestionStore.remove(id: suggestion.id)
+        refreshSuggestions()
+    }
+
+    /// Drop a suggestion without acting on it; it won't be offered again.
+    func dismissSuggestion(_ suggestion: VocabularySuggestion) {
+        suggestionStore.remove(id: suggestion.id)
+        refreshSuggestions()
     }
 
     func copyRecord(_ record: TranscriptRecord) {

@@ -23,5 +23,6 @@ runVerbatimTests(suite)
 runContextBiasTests(suite)
 runMetricsTests(suite)
 runLatencyTests(suite)
+runLearningTests(suite)
 
 suite.finish()
