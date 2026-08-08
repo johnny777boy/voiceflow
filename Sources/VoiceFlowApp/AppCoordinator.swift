@@ -103,6 +103,9 @@ final class AppCoordinator: ObservableObject {
         // covers every dictation before that, and any Whisper runtime failure).
         // No relaunch needed in either direction.
         let whisper = WhisperKitTranscriber()
+        // Second opinion for Whisper's silence-hallucinations: Apple's engine
+        // emits nothing on silent clips, so it can veto phantom "Thank you."s.
+        whisper.silenceArbiter = live
         self.whisperManager = WhisperModelManager(transcriber: whisper)
         let transcriber: Transcribing = FallbackTranscriber(
             preferred: whisper,
