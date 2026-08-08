@@ -1,9 +1,9 @@
 # Codex Verification Brief — Whisper branch → main merge
 
 Repo: github.com/johnny777boy/voiceflow
-Branch to verify: `feature/system-dictation-daily-use` (head `a1845e3` — includes fixes from an internal review round)
+Branch to verify: `feature/system-dictation-daily-use` (head: latest on branch — includes two internal review rounds)
 Merge target: `main` (`05d0e58`)
-Diff to review: `git diff 05d0e58..a1845e3 -- Sources/` (ignore docs/: BACKLOG.md and
+Diff to review: `git diff 05d0e58..HEAD -- Sources/` (ignore docs/: BACKLOG.md and
 WISPR_GAP_FINDINGS.md show as deleted only because they landed on main after the
 branch was cut — expected, not a defect).
 
