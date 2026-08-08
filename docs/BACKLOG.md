@@ -3,16 +3,14 @@
 Last updated: 2026-08-08 (late session). Read CLAUDE.md first (workflow ritual +
 product principles), then this, then docs/ROADMAP.md (phased plan to sellable).
 
-## ⏸️ RESUME HERE — Phase 0 merge is one Codex verdict away
-Branch `fix/consistent-chat-formatting` (head `0b6eb26`, pushed, INSTALLED as the
-running app): uniform formatting everywhere + phantom-killer (Apple-engine
-arbiter) + bidirectional verbatim guard + continuation-gap memory + settings
-migration + framework docs. Verified by BOTH reviewer agents; every Critical/
-Important finding fixed (commit 0b6eb26). 108 tests, 0 warnings.
-**Waiting ONLY on: Yoni pastes the Codex verdict** (brief:
-docs/CODEX-BRIEF-FORMATTING-MERGE.md, verify current branch HEAD). On PASS →
-merge ritual (tag pre-formatting-merge → merge --no-ff → test → tag verified →
-push → rebuild+reinstall). Then Phase 1 (context biasing) on a fresh branch.
+## ✅ Phase 0 MERGED (2026-08-08) — resume with Phase 1
+`fix/consistent-chat-formatting` merged to main (merge `3a41efe`) after the full
+ritual: both reviewer agents + Codex (initial FAIL on the 1-char guard exemption
+→ fixed in e85a45e, contraction-shards-only → Codex PASS). Tags:
+`verified-2026-08-08-formatting` (current) · `pre-formatting-merge-2026-08-08`
+(rollback). 109 tests, 0 warnings. App rebuilt from main and installed.
+**Next: Phase 1 (context biasing) from docs/ROADMAP.md on a fresh branch** —
+step 1 is verifying the pinned WhisperKit contains the promptTokens fix (PR#514).
 
 **Decisions queued for Yoni (do not act without him):**
 1. Guard strictness (adversarial F4): the bidirectional guard rejects most
