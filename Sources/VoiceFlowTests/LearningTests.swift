@@ -15,6 +15,49 @@ func runLearningTests(_ suite: TestSuite) {
         s.expectEqual(correction, WordCorrection(heard: "Sara", corrected: "Sarah"))
     }
 
+    suite.test("correction: an everyday word pair is never learned") { s in
+        // Accepting a suggestion installs an UNCONDITIONAL whole-word rewrite on
+        // every future transcript. Learning "form"→"from" would therefore rewrite
+        // the word every time the user legitimately says it — the verbatim
+        // violation the whole design exists to prevent, via a button.
+        s.expectNil(CorrectionDetector.detect(
+            inserted: "please fill the form today", final: "please fill the from today"))
+        s.expectNil(CorrectionDetector.detect(
+            inserted: "I put it there yesterday", final: "I put it their yesterday"))
+        s.expectNil(CorrectionDetector.detect(
+            inserted: "send it to him", final: "send it too him"))
+    }
+
+    suite.test("correction: names and dotted compounds still learn") { s in
+        s.expectEqual(
+            CorrectionDetector.detect(inserted: "ask sara about it", final: "ask Sarah about it"),
+            WordCorrection(heard: "sara", corrected: "Sarah"))
+        s.expectEqual(
+            CorrectionDetector.detect(inserted: "built with next", final: "built with Next.js"),
+            WordCorrection(heard: "next", corrected: "Next.js"))
+    }
+
+    // MARK: - What "edited" means for the zero-edit rate
+
+    suite.test("edited: typing after our sentence is not an edit of our sentence") { s in
+        let inserted = "The meeting is at four."
+        // The most ordinary thing anyone does: dictate a line, then keep writing.
+        s.expect(CorrectionDetector.insertedTextSurvived(
+            inserted, in: "The meeting is at four. Let me know if that works."))
+        s.expect(CorrectionDetector.insertedTextSurvived(
+            inserted, in: "Hi Sam — The meeting is at four."))
+        // Whitespace reflow doesn't count as the user rejecting our text.
+        s.expect(CorrectionDetector.insertedTextSurvived(
+            inserted, in: "The  meeting is\nat four."))
+    }
+
+    suite.test("edited: changing our words IS an edit") { s in
+        let inserted = "The meeting is at four."
+        s.expectFalse(CorrectionDetector.insertedTextSurvived(
+            inserted, in: "The meeting is at five."))
+        s.expectFalse(CorrectionDetector.insertedTextSurvived(inserted, in: "scrapped it"))
+    }
+
     suite.test("correction: real editing is never mistaken for a word fix") { s in
         // Two changes, added words, removed words, wholesale rewrite.
         s.expectNil(CorrectionDetector.detect(

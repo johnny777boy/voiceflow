@@ -7,6 +7,30 @@ import VoiceFlowTestKit
 /// vocabulary always wins the space, and nothing sensitive ever becomes a term.
 func runContextBiasTests(_ suite: TestSuite) {
 
+    // MARK: - Prompt echo (the decoder reading our glossary back at us)
+
+    suite.test("echo: a transcript that is mostly the prompt glossary is caught") { s in
+        let terms = ["Compose", "Drafts", "Snoozed", "Archive", "Meeting", "Payload CMS"]
+        // The classic Whisper failure: near-silence decodes to the conditioning text.
+        s.expect(TranscriptSanity.looksLikePromptEcho(
+            text: "Compose, Drafts, Snoozed, Archive, Meeting.", promptTerms: terms))
+        s.expect(TranscriptSanity.looksLikePromptEcho(
+            text: "Drafts Archive Compose Meeting Snoozed", promptTerms: terms))
+    }
+
+    suite.test("echo: ordinary speech that mentions the user's terms is NOT an echo") { s in
+        let terms = ["Compose", "Drafts", "Snoozed", "Archive", "Meeting", "Payload CMS"]
+        // A false positive here throws away real speech, so the bar is high.
+        s.expectFalse(TranscriptSanity.looksLikePromptEcho(
+            text: "can you move the meeting to tomorrow afternoon", promptTerms: terms))
+        s.expectFalse(TranscriptSanity.looksLikePromptEcho(
+            text: "I put the draft in Payload CMS this morning", promptTerms: terms))
+        // Too short to judge, and no terms at all.
+        s.expectFalse(TranscriptSanity.looksLikePromptEcho(text: "Drafts Archive", promptTerms: terms))
+        s.expectFalse(TranscriptSanity.looksLikePromptEcho(
+            text: "Compose Drafts Archive Meeting", promptTerms: []))
+    }
+
     // MARK: - TranscriptionContext
 
     suite.test("context: vocabulary comes before screen terms and dedupes case-insensitively") { s in
@@ -63,6 +87,18 @@ func runContextBiasTests(_ suite: TestSuite) {
             s.expectFalse(term.count > 12 && term.contains(where: { $0.isNumber }), "opaque id leaked: \(term)")
         }
         s.expect(terms.contains("Sarah"), "the actual name was lost: \(terms)")
+    }
+
+    suite.test("screen terms: anything mixing letters and digits is refused") { s in
+        // Short alphanumerics used to slip through the length-based id filter, so
+        // a visible 2FA code or licence-key fragment could become a bias term —
+        // i.e. get lifted off the screen and into the recognizer's prompt.
+        let terms = ScreenTermExtractor.terms(
+            in: "we told Sarah the code X4F9K2 and the licence AB12 for Kubernetes")
+        s.expectFalse(terms.contains("X4F9K2"), "a short code was harvested: \(terms)")
+        s.expectFalse(terms.contains("AB12"), "a short code was harvested: \(terms)")
+        s.expect(terms.contains("Sarah"))
+        s.expect(terms.contains("Kubernetes"))
     }
 
     suite.test("screen terms: possessives are normalized and repeats rank first") { s in

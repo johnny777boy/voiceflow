@@ -104,7 +104,7 @@ func runLatencyTests(_ suite: TestSuite) {
         s.expectNil(inserter.replacedText)
     }
 
-    suite.test("two-phase: on — deterministic text lands first, then is upgraded in place") { s in
+    suite.test("two-phase: phase one lands immediately, the upgrade follows after the dictation returns") { s in
         var settings = AppSettings.default
         settings.twoPhaseDeliveryEnabled = true
         settings.fastShortUtterances = false
@@ -112,19 +112,39 @@ func runLatencyTests(_ suite: TestSuite) {
         inserter.supportsReplacement = true
         let transcriber = MockTranscriber()
         transcriber.resultToReturn = TranscriptionResult(text: "the quick brown fox jumps over the lazy dog")
+        let history = InMemoryHistoryStore()
         let controller = DictationController(
             audio: MockAudioRecorder(), transcriber: transcriber,
             cleanup: CleanupPipeline(llmProvider: SpyCleanupProvider(), useLLM: true),
             inserter: inserter, activeApp: MockActiveAppProvider(),
-            history: InMemoryHistoryStore(), settings: settings, time: MockTimeSource()
+            history: history, settings: settings, time: MockTimeSource()
         )
-        let result = blockingAwait { () -> DictationResult? in
+        let outcome = blockingAwait { () -> (result: DictationResult?, polishedBeforeReturn: Bool) in
             try? await controller.beginRecording()
-            return try? await controller.finishRecording()
+            let finished = try? await controller.finishRecording()
+            let alreadyPolished = inserter.replacedText != nil
+            for _ in 0..<100 where inserter.replacedText == nil {
+                try? await Task.sleep(nanoseconds: 10_000_000)
+            }
+            return (finished, alreadyPolished)
         }
+        let result = outcome.result
+        // The polish must NOT have been awaited by finishRecording: holding the
+        // dictation open across the second LLM pass leaves the hotkey inert
+        // exactly when the user, now seeing their text, starts the next utterance
+        // — which silently truncated it.
+        s.expectEqual(outcome.polishedBeforeReturn, false,
+                      "phase two blocked the dictation instead of following it")
+        // What the user saw first: one insertion, of the deterministic text, which
+        // is what the returned record reports.
+        s.expectEqual(inserter.insertCount, 1)
+        s.expectEqual(result?.record.cleanText, "The quick brown fox jumps over the lazy dog.")
+        // The upgrade arrives afterwards, in place, and history is corrected to it.
         s.expectEqual(inserter.replacedText, "The quick brown fox jumps over the lazy dog. [Polished]")
-        // History must record what ended up in the field, not the interim text.
-        s.expectEqual(result?.record.cleanText, "The quick brown fox jumps over the lazy dog. [Polished]")
+        if let id = result?.record.id {
+            s.expectEqual(try? history.record(id: id)?.cleanText,
+                          "The quick brown fox jumps over the lazy dog. [Polished]")
+        }
     }
 
     suite.test("two-phase: a destination that refuses the swap keeps the delivered text") { s in

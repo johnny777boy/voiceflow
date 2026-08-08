@@ -38,12 +38,26 @@ public actor DictationController {
     private var recordStartTime: TimeInterval = 0
     /// Screen-noun harvest kicked off at record start so its cost is paid while
     /// the user is still speaking, never after they release the key.
-    private var screenHarvest: Task<Void, Never>?
     private var screenHarvestResult: HarvestBox?
+
+    /// The harvest runs here rather than on the Swift cooperative pool.
+    ///
+    /// `frontmostWindowText()` is synchronous, uncancellable C code that blocks
+    /// on another process. The cooperative pool has one thread per core and every
+    /// `await` in the app shares it, so a handful of blocked harvests against an
+    /// unresponsive app could starve the pool and stall the whole dictation
+    /// pipeline. A dedicated serial queue confines the damage to the harvest
+    /// itself: at worst the next harvest is late, and a late harvest is simply
+    /// skipped.
+    private static let harvestQueue = DispatchQueue(
+        label: "com.voiceflow.screen-harvest", qos: .userInitiated
+    )
     /// True from the moment `finishRecording` takes the capture until it returns.
     /// The actor is reentrant across its `await`s, so this marks the window in
     /// which another call must not touch the recorder.
     private var isFinishing = false
+    /// Phase two of two-phase delivery, running after `finishRecording` returned.
+    private var pendingRefinement: Task<Void, Never>?
 
     /// One-shot mailbox for the harvest result. A plain box rather than
     /// `await task.value` on purpose: the AX read is synchronous C code that
@@ -94,6 +108,9 @@ public actor DictationController {
     /// Capture the destination and begin recording. Idempotent-ish: if already
     /// recording, this is a no-op capture refresh.
     public func beginRecording() throws {
+        // A new dictation supersedes the previous one's in-flight polish.
+        pendingRefinement?.cancel()
+        pendingRefinement = nil
         pendingSnapshot = activeApp.captureSnapshot()
         recordStartTime = time.now()
         try audio.startRecording()
@@ -111,8 +128,6 @@ public actor DictationController {
     /// is also what the user sees happen.
     public func cancelRecording() {
         guard !isFinishing else { return }
-        screenHarvest?.cancel()
-        screenHarvest = nil
         screenHarvestResult = nil
         _ = try? audio.stopRecording()
         audio.discardPendingCapture()   // remove the temp capture file we won't transcribe
@@ -124,16 +139,16 @@ public actor DictationController {
     /// Read the frontmost window's proper nouns WHILE the user speaks. Started
     /// here (not at release) so its cost lands during the hold, where it is free.
     private func startScreenHarvest() {
-        screenHarvest?.cancel()
-        screenHarvest = nil
         screenHarvestResult = nil
         guard settings.screenContextEnabled, let screenContext else { return }
         let known = Set(settings.vocabulary.filter { $0.isEnabled }.map { $0.written })
         let box = HarvestBox()
         screenHarvestResult = box
-        screenHarvest = Task.detached(priority: .userInitiated) {
+        // Fire-and-forget by design. There is no handle to cancel because the
+        // work underneath cannot be cancelled; dropping the box is how a
+        // superseded harvest is abandoned, and its result is then read by nobody.
+        Self.harvestQueue.async {
             let text = screenContext.frontmostWindowText()
-            guard !Task.isCancelled else { return }
             box.fill(text.map { ScreenTermExtractor.terms(in: $0, excluding: known) } ?? [])
         }
     }
@@ -146,7 +161,6 @@ public actor DictationController {
     private func harvestedScreenTerms(timeout: TimeInterval = 0.2) async -> [String] {
         guard let box = screenHarvestResult else { return [] }
         screenHarvestResult = nil
-        screenHarvest = nil
         if let ready = box.terms { return ready }
         // Wall clock on purpose: this is a real-time budget for another thread's
         // work, not a logical timestamp the injected clock should control.
@@ -177,11 +191,14 @@ public actor DictationController {
         }
         pendingSnapshot = nil
 
-        // Drain first (async, off the main thread), then take the capture. From
-        // here until this call returns, the capture belongs to this finish.
-        await audio.drainBeforeStop()
+        // Claim the capture BEFORE the drain suspends. The actor is reentrant
+        // across `await`, so a cancel arriving during the 0.18s drain would
+        // otherwise pass the `!isFinishing` guard and delete the file this call
+        // is about to transcribe.
         isFinishing = true
         defer { isFinishing = false }
+        // Drain first (async, off the main thread), then take the capture.
+        await audio.drainBeforeStop()
         let capture = try audio.stopRecording()
         // Everything after this point is the number the user actually feels:
         // key released → text in the field. Hold time is deliberately excluded.
@@ -226,7 +243,7 @@ public actor DictationController {
         )
 
         // Deliver text.
-        var clean = firstPass
+        let clean = firstPass
         let outcome: InsertionOutcome
         if plan.willInsert {
             // Focus the intended destination app before pasting, in case focus
@@ -239,9 +256,6 @@ public actor DictationController {
                 inserter.copyToClipboard(firstPass)
                 outcome = InsertionOutcome(strategy: .copyOnly, didInsert: false,
                                            note: "Insertion failed; copied to clipboard. (\(error.localizedDescription))")
-            }
-            if twoPhase, outcome.didInsert {
-                clean = await refineInPlace(raw: raw, delivered: firstPass, context: context)
             }
         } else {
             inserter.copyToClipboard(firstPass)
@@ -270,7 +284,32 @@ public actor DictationController {
             try? history.trim(toMostRecent: settings.historyRetentionLimit)
         }
 
+        // Phase two runs AFTER this call returns, never inside it. The caller
+        // serializes dictations against this method, so awaiting the second LLM
+        // pass here would leave the hotkey inert for a second or more — starting
+        // exactly when the user can SEE their text and is most likely to start
+        // speaking again, which silently truncated the next utterance.
+        if twoPhase, outcome.didInsert {
+            scheduleRefinement(
+                recordID: record.id, raw: raw, delivered: firstPass,
+                context: context, persist: settings.historyEnabled
+            )
+        }
+
         return DictationResult(record: record, plan: plan, outcome: outcome)
+    }
+
+    /// Run phase two off the dictation path, and keep history honest about what
+    /// ended up in the field. Superseded by the next dictation.
+    private func scheduleRefinement(
+        recordID: UUID, raw: String, delivered: String, context: CleanupContext, persist: Bool
+    ) {
+        pendingRefinement?.cancel()
+        pendingRefinement = Task { [self] in
+            let refined = await refineInPlace(raw: raw, delivered: delivered, context: context)
+            guard refined != delivered, persist else { return }
+            try? history.updateCleanText(refined, id: recordID)
+        }
     }
 
     /// Second phase of two-phase delivery: run the full cleanup and, only if it
@@ -283,6 +322,9 @@ public actor DictationController {
     ) async -> String {
         guard let refined = try? await cleanup.clean(raw, context: context),
               !refined.isEmpty, refined != delivered else { return delivered }
+        // A new dictation supersedes this one: never reach into a field the user
+        // has since moved on from.
+        guard !Task.isCancelled else { return delivered }
         guard inserter.replaceLastInsertion(with: refined) else {
             Log.cleanup.notice("Two-phase refine declined — keeping the delivered text")
             return delivered

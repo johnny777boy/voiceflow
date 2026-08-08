@@ -103,7 +103,9 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
         memoryLock.unlock()
 
         guard let payload, let insertedAt, Date().timeIntervalSince(insertedAt) < 10 else { return false }
-        guard bundleID == nil || NSWorkspace.shared.frontmostApplication?.bundleIdentifier == bundleID else {
+        // Fail CLOSED on an unknown origin app. An unreadable bundle ID at insert
+        // time is not permission to rewrite whatever happens to be focused now.
+        guard let bundleID, NSWorkspace.shared.frontmostApplication?.bundleIdentifier == bundleID else {
             return false
         }
         if focusedFieldIsSecure() { return false }
@@ -119,6 +121,19 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
         let prefix = payload.hasPrefix(" ") ? " " : ""
         let replacement = prefix + newText
         guard AX.setSelectedRange(focused, location: range.location, length: range.length) else { return false }
+        // Selecting the text opens a window in which OUR text is highlighted in a
+        // field the user is looking at, and the write below is a round-trip into
+        // another process that can stall. If they type during that window the app
+        // replaces the selection, and the write would then land at their new
+        // caret — eating the keystroke and inserting the text a second time. So
+        // re-prove the range still holds before committing to it.
+        guard let recheckValue = AX.string(focused, kAXValueAttribute),
+              recheckValue == value,
+              let held = AX.selectedRange(focused),
+              held.location == range.location, held.length == range.length else {
+            _ = AX.setSelectedRange(focused, location: caret, length: 0)
+            return false
+        }
         guard AX.setString(focused, kAXSelectedTextAttribute, replacement) else {
             // Restore the collapsed caret so a failed upgrade doesn't leave the
             // user's own text selected (one keystroke from being overwritten).

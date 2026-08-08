@@ -98,6 +98,10 @@ public enum DualEngineVoting {
     /// Move the primary word's leading/trailing punctuation onto the replacement.
     static func transferAffixes(from original: String, to replacement: String) -> String {
         let isCore: (Character) -> Bool = { $0.isLetter || $0.isNumber }
+        // A word with no letters or digits at all (a stray dash) has no affixes to
+        // transfer — treating it as both prefix AND suffix would wrap the
+        // replacement in punctuation and produce a token neither engine emitted.
+        guard original.contains(where: isCore) else { return replacement }
         let prefix = String(original.prefix(while: { !isCore($0) }))
         let suffix = String(original.reversed().prefix(while: { !isCore($0) }).reversed())
         let core = replacement.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)

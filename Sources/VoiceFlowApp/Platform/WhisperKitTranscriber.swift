@@ -92,8 +92,11 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
     /// hijack the decoder's task/language prefill), and the prompt must stay far
     /// below half the 448-token context so it can never crowd out the audio.
     ///
-    /// Biasing changes *probabilities*, never the vocabulary: Whisper can still
-    /// emit any word, so a prompt cannot put a word in the user's mouth.
+    /// Biasing changes *probabilities*, but it is NOT free of risk: because the
+    /// prompt is presented as preceding text, a decoder with little to work with
+    /// can continue it and emit the glossary as the transcript. That is real and
+    /// documented, so the output is checked for prompt echo after decode
+    /// (`TranscriptSanity.looksLikePromptEcho`) — never trusted blind.
     private static func promptTokens(
         for context: VoiceFlowCore.TranscriptionContext,
         tokenizer: any WhisperTokenizer,
@@ -215,6 +218,33 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         // Short real utterances ("yes", "okay send it") are safe: the arbiter
         // hears them and approves (proven live same day).
         let wordCount = text.split(whereSeparator: { $0 == " " }).count
+
+        // Prompt echo: the decoder read our bias glossary back instead of the
+        // audio. Handled BEFORE the phantom check because it has a different
+        // remedy — the text isn't a stock hallucination to veto, it's our own
+        // context leaking into the transcript, and it can be any length, so the
+        // "short clip, few words" test below would never catch it. Delivering it
+        // would both insert words the user never said and paste what was on their
+        // screen into whatever they're typing.
+        if TranscriptSanity.looksLikePromptEcho(text: text, promptTerms: context.orderedTerms) {
+            Log.transcription.error("Whisper echoed the context prompt — discarding the decode")
+            switch try await consultArbiter(audio, languageCode: languageCode, context: context) {
+            case .heard(let second):
+                // The other engine transcribed the same audio without a prompt to
+                // echo, so its text is the trustworthy one. Still a real engine's
+                // output — nothing is invented here.
+                Log.transcription.notice("Arbiter transcript used in place of the echoed decode")
+                try? FileManager.default.removeItem(at: url)
+                return VoiceFlowCore.TranscriptionResult(text: second)
+            case .silence, .unavailable:
+                // Silence ⇒ there was nothing to hear anyway. Unavailable ⇒ we
+                // cannot verify, and a contaminated transcript must not be
+                // delivered on faith; the capture file is left intact so the
+                // Apple fallback re-runs it cleanly.
+                throw VoiceFlowError.emptyTranscript
+            }
+        }
+
         let suspicious = TranscriptSanity.isOutroPhrase(text)
             || (clipSeconds <= 3.0 && wordCount <= 4)
         if suspicious {
@@ -225,7 +255,12 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
                 case .heard(let second):
                     Log.transcription.notice("Arbiter heard speech — delivering Whisper text")
                     // The second opinion is already paid for; let it fix a name.
-                    return VoiceFlowCore.TranscriptionResult(text: vote(primary: text, secondary: second, context: context))
+                    let merged = vote(primary: text, secondary: second, context: context)
+                    // The arbiter consumed the capture through its own path; this
+                    // keeps deletion symmetric with the near-miss branch below so
+                    // no future arbiter can leak the file.
+                    try? FileManager.default.removeItem(at: url)
+                    return VoiceFlowCore.TranscriptionResult(text: merged)
                 case .silence:
                     // The one verdict that means "silence": discard the phantom.
                     Log.transcription.notice("Arbiter heard nothing — phantom discarded")
@@ -247,7 +282,15 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         } else if silenceArbiter != nil,
                   DualEngineVoting.containsNearMiss(
                       text: text,
-                      vocabulary: context.orderedTerms,
+                      // The user's OWN vocabulary only — deliberately not the
+                      // screen terms. Window chrome ("Report", "Meeting",
+                      // "Monday") sits one edit from ordinary words, so including
+                      // it fired the second engine on a large fraction of normal
+                      // sentences (spending the second Phase 3 saved) and let a
+                      // UI label overrule a correctly-heard word: "see you Sunday"
+                      // → "see you Monday". Screen terms bias the decoder; they do
+                      // not get a vote on the result.
+                      vocabulary: context.vocabularyTerms,
                       // A decoder that was unsure gets the wider net.
                       maxEdits: (minLogProb ?? 0) < -0.55 ? 2 : 1
                   ) {
@@ -305,8 +348,9 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
     private func vote(
         primary: String, secondary: String, context: VoiceFlowCore.TranscriptionContext
     ) -> String {
+        // Vocabulary only, never screen terms — see the near-miss call site.
         let result = DualEngineVoting.reconcile(
-            primary: primary, secondary: secondary, vocabulary: context.orderedTerms)
+            primary: primary, secondary: secondary, vocabulary: context.vocabularyTerms)
         guard result.changedAnything else { return primary }
         Log.transcription.notice("Dual-engine vote replaced \(result.substitutions.count, privacy: .public) word(s) with vocabulary-consistent alternatives")
         return result.text

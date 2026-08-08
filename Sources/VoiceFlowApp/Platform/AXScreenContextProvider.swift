@@ -20,13 +20,16 @@ final class AXScreenContextProvider: ScreenContextProviding {
     /// Apps whose window contents we never read, even with permission. These
     /// windows are exactly where a stray string would be most sensitive, and no
     /// dictation needs their vocabulary.
+    ///
+    /// Entries MUST be lowercase — they are matched against a lowercased bundle
+    /// ID, so a capital here silently disables the entry.
     private static let denyList: Set<String> = [
         "com.apple.keychainaccess",
         "com.agilebits.onepassword7", "com.1password.1password", "com.agilebits.onepassword-osx",
         "com.bitwarden.desktop",
         "com.dashlane.dashlanephonefinal",
-        "in.sinew.Enpass-Desktop",
-        "com.lastpass.LastPass",
+        "in.sinew.enpass-desktop",
+        "com.lastpass.lastpass",
         "org.keepassxc.keepassxc",
     ]
 
@@ -54,11 +57,9 @@ final class AXScreenContextProvider: ScreenContextProviding {
               bundleID != VoiceFlowInfo.bundleIdentifier,
               !Self.denyList.contains(bundleID.lowercased()) else { return nil }
 
-        let appElement = AXUIElementCreateApplication(app.processIdentifier)
-        // Hard ceiling on how long any single AX call may block this thread.
-        AXUIElementSetMessagingTimeout(appElement, 0.25)
-        guard let window = AX.element(appElement, kAXFocusedWindowAttribute)
-                ?? AX.element(appElement, kAXMainWindowAttribute) else { return nil }
+        let appElement = Self.bounded(AXUIElementCreateApplication(app.processIdentifier))
+        guard let window = AX.element(appElement, kAXFocusedWindowAttribute).map(Self.bounded)
+                ?? AX.element(appElement, kAXMainWindowAttribute).map(Self.bounded) else { return nil }
 
         var pieces: [String] = []
         var characters = 0
@@ -78,9 +79,15 @@ final class AXScreenContextProvider: ScreenContextProviding {
         while !queue.isEmpty, visited < elementBudget, characters < characterCap, Date() < deadline {
             let element = queue.removeFirst()
             visited += 1
+            // The deadline is re-checked before every AX round-trip, not just per
+            // element: each call can burn the full messaging timeout, so an
+            // iteration that begins a microsecond before the deadline would
+            // otherwise run half a dozen of them to completion.
             if Self.isSecureElement(element) { continue }
+            guard Date() < deadline else { break }
             if let role = AX.string(element, kAXRoleAttribute), Self.textRoles.contains(role) {
                 for attribute in [kAXValueAttribute, kAXTitleAttribute] {
+                    guard Date() < deadline else { break }
                     if let text = AX.string(element, attribute), !text.isEmpty, text.count <= 2_000 {
                         pieces.append(text)
                         characters += text.count
@@ -88,12 +95,27 @@ final class AXScreenContextProvider: ScreenContextProviding {
                     }
                 }
             }
+            guard Date() < deadline else { break }
             if let children = Self.children(of: element) {
-                queue.append(contentsOf: children.prefix(64))
+                queue.append(contentsOf: children.prefix(64).map(Self.bounded))
             }
         }
         let text = pieces.joined(separator: " ")
         return text.isEmpty ? nil : String(text.prefix(characterCap))
+    }
+
+    /// Cap how long any single AX round-trip on this element may block.
+    ///
+    /// This MUST be applied to every element we touch. The timeout binds to the
+    /// one object it is set on — not to equal objects, and not to children
+    /// discovered through it (only the system-wide element sets a process
+    /// default). Setting it on the application element alone left every window,
+    /// role and value read on the 6-second system default, which is how a single
+    /// beachballed app could hold a thread for the better part of a minute
+    /// despite this type's three "budgets".
+    @discardableResult
+    private static func bounded(_ element: AXUIElement) -> AXUIElement {
+        AX.bounded(element)
     }
 
     private static func isSecureElement(_ element: AXUIElement) -> Bool {

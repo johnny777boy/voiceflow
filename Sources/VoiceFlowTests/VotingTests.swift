@@ -29,11 +29,27 @@ func runVotingTests(_ suite: TestSuite) {
         let primary = "we deploy cuber netties daily"
         let secondary = "we deploy Kubernetes today daily"
         let result = DualEngineVoting.reconcile(primary: primary, secondary: secondary, vocabulary: vocabulary)
-        let produced = Set(result.text.split(separator: " ").map(String.init))
-        let allowed = Set((primary + " " + secondary).split(separator: " ").map(String.init))
+        // Compare WORD CORES, not raw tokens: the swap deliberately carries the
+        // primary's punctuation across ("Sara." + "Sarah" → "Sarah."), so a raw
+        // token comparison asserts something stronger than the design promises
+        // and passes only by luck of the chosen inputs.
+        let core = { (w: Substring) in
+            String(w.lowercased().filter { $0.isLetter || $0.isNumber })
+        }
+        let produced = Set(result.text.split(separator: " ").map(core))
+        let allowed = Set((primary + " " + secondary).split(separator: " ").map(core))
         for word in produced {
             s.expect(allowed.contains(word), "invented word: \(word)")
         }
+    }
+
+    suite.test("voting: a punctuation-only word is not wrapped around the replacement") { s in
+        // Regression: when the primary's word has no letters or digits at all, the
+        // affix logic captured the WHOLE token as both prefix and suffix, emitting
+        // "—Sarah—" — a token neither engine produced.
+        let result = DualEngineVoting.reconcile(
+            primary: "hi — today", secondary: "hi Sarah today", vocabulary: vocabulary)
+        s.expectEqual(result.text, "hi Sarah today")
     }
 
     suite.test("voting: engines that heard different structure are not merged") { s in

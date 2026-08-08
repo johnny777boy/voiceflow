@@ -376,7 +376,11 @@ final class AppCoordinator: ObservableObject {
             statusText = result.outcome.didInsert ? "Inserted" : (result.outcome.note ?? "Copied to clipboard")
             overlay.show(state: .done(result))
             refreshHistory()
-            if result.outcome.didInsert {
+            // Learning from corrections is part of keeping history: it reads the
+            // user's field a moment after insertion and persists word pairs taken
+            // from it. Someone who turned history OFF has said they don't want
+            // their dictations kept, and this must honour that.
+            if result.outcome.didInsert, settings.historyEnabled {
                 corrections?.watch(recordID: result.record.id, insertedText: result.record.cleanText)
             }
         } catch {
@@ -443,6 +447,11 @@ final class AppCoordinator: ObservableObject {
 
     func clearHistory() {
         try? history.deleteAll()
+        // Words learned from corrections are dictation history too — leaving them
+        // on disk after "Clear History" would be a lie.
+        corrections?.cancel()
+        suggestionStore.removeAll()
+        refreshSuggestions()
         refreshHistory()
     }
 

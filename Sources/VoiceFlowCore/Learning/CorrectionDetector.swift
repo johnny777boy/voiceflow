@@ -80,7 +80,37 @@ public enum CorrectionDetector {
         // recognizer error we should encode.
         guard heardCore.allSatisfy({ $0.isLetter || $0 == "'" || $0 == "-" }),
               correctedCore.allSatisfy({ $0.isLetter || $0 == "'" || $0 == "-" || $0 == "." }) else { return false }
+        // The correction must look like a NAME or jargon, not an ordinary word.
+        //
+        // This is the load-bearing guard. Accepting a suggestion installs an
+        // unconditional case-insensitive whole-word rewrite on every future
+        // transcript, so learning an everyday pair ("form"→"from") would go on to
+        // rewrite the word every time the user legitimately says it — the exact
+        // word-replacement the verbatim policy forbids, just laundered through a
+        // button. A capital or a dotted compound is the cheap, reliable signal
+        // that we're looking at a name ("sara"→"Sarah", "next js"→"Next.js").
+        // Lowercase jargon is a deliberate false negative: it costs a suggestion,
+        // never the user's words.
+        guard correctedCore.contains(where: { $0.isUppercase }) || correctedCore.contains(".") else {
+            return false
+        }
         return true
+    }
+
+    /// Whether the text we delivered is still present, verbatim, in the field.
+    ///
+    /// This is the zero-edit signal. Comparing the WHOLE field before and after
+    /// would count "the user kept typing after the dictation" as an edit, which
+    /// is the single most common thing anyone does and says nothing about our
+    /// accuracy. What matters is whether our sentence survived untouched.
+    public static func insertedTextSurvived(_ insertedText: String, in final: String) -> Bool {
+        let needle = collapseWhitespace(insertedText)
+        guard !needle.isEmpty else { return true }
+        return collapseWhitespace(final).contains(needle)
+    }
+
+    static func collapseWhitespace(_ text: String) -> String {
+        text.split(whereSeparator: { $0 == " " || $0.isNewline || $0 == "\t" }).joined(separator: " ")
     }
 
     /// Strip surrounding punctuation so "Sarah," and "Sarah" are the same word.

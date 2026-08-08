@@ -137,6 +137,12 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
         Log.transcription.notice("SA record: warm=\(self.engine != nil, privacy: .public) prerollFrames=\(prerollFrames, privacy: .public)")
     }
 
+    /// The lock-guarded view of "are we capturing", safe to read from any thread.
+    private var isRecordingSynchronized: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return recording
+    }
+
     /// Drain: let the tap keep writing for a beat so the trailing audio (the last
     /// word) lands in the file before it closes.
     ///
@@ -146,7 +152,11 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
     /// thread for 0.18s on every dictation stalled the overlay animation and the
     /// window at exactly the moment the user is watching for feedback.
     func drainBeforeStop() async {
-        guard isRecording else { return }
+        // Read the LOCK-GUARDED flag, not the main-thread `isRecording`: this is
+        // the one method on this type that runs off the main thread, so the plain
+        // property would be an unsynchronized cross-thread read. Same 0.18s wait,
+        // same tap, same file — only the read is synchronized.
+        guard isRecordingSynchronized else { return }
         try? await Task.sleep(nanoseconds: 180_000_000)
     }
 

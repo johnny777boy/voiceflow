@@ -107,7 +107,12 @@ public enum ScreenTermExtractor {
             return false
         }
         guard token.contains(where: { $0.isLetter }) else { return false }        // pure numbers/dates
-        if token.contains(where: { $0.isNumber }), token.count > 12 { return false }  // ids, hashes, tokens
+        // Anything mixing letters and digits is refused outright. That shape is a
+        // 2FA code, a licence-key fragment, an order id or a session token far
+        // more often than it is a word worth biasing on — and those are exactly
+        // the strings that must never be lifted off a screen into a prompt. It
+        // costs us "H100"-style product names; that trade is not close.
+        if token.contains(where: { $0.isNumber }) { return false }
 
         let letters = token.filter { $0.isLetter }
         let uppercase = letters.filter { $0.isUppercase }.count

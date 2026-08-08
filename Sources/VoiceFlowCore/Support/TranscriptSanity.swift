@@ -84,6 +84,34 @@ public enum TranscriptSanity {
         return String(kept).split(separator: " ").joined(separator: " ")
     }
 
+    /// True when the transcript looks like the decoder read back its own context
+    /// prompt instead of transcribing the audio.
+    ///
+    /// Whisper consumes bias terms as "text that came just before this audio"
+    /// (`<|startofprev|>`). On low-information audio the decoder can simply
+    /// CONTINUE that text — emitting the glossary as the transcript. That would
+    /// insert words the user never said, and, since some of those terms are read
+    /// off the screen, leak window contents into whatever they're typing in.
+    ///
+    /// Detection is deliberately hard to trip: at least four words, at least
+    /// three DISTINCT prompt terms, and a majority of the content words matching
+    /// the prompt. A genuine sentence that happens to use one or two vocabulary
+    /// names never qualifies ("tell Sarah about Kubernetes" is 2 of 4).
+    public static func looksLikePromptEcho(text: String, promptTerms: [String]) -> Bool {
+        guard !promptTerms.isEmpty else { return false }
+        let words = normalized(text).split(separator: " ").map(String.init)
+        guard words.count >= 4 else { return false }
+        // Multi-word terms contribute each of their words.
+        var termWords = Set<String>()
+        for term in promptTerms {
+            for word in normalized(term).split(separator: " ") { termWords.insert(String(word)) }
+        }
+        guard !termWords.isEmpty else { return false }
+        let matches = words.filter { termWords.contains($0) }
+        guard Set(matches).count >= 3 else { return false }
+        return Double(matches.count) / Double(words.count) >= 0.6
+    }
+
     /// True when the ENTIRE transcript is a known phantom phrase AND at least one
     /// doubt signal corroborates (decoder avg log-prob below -1.0, or the clip
     /// was near-silent). Both-nil signals ⇒ always false (fail-open).

@@ -49,13 +49,23 @@ final class CorrectionWatcher {
     func watch(recordID: UUID, insertedText: String) {
         cancel()
         guard !insertedText.isEmpty else { return }
+        // `AX.focusedElement` returns a timeout-bounded element: these reads run
+        // on the main actor, and an unresponsive app would otherwise freeze the
+        // whole UI for the AX default of six seconds per call.
         guard let element = AX.focusedElement(), !Self.isSecure(element) else { return }
         guard let before = AX.string(element, kAXValueAttribute) else { return }   // AX-blind field
         let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        let armedAt = Date()
 
         pending = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64((self?.window ?? 6) * 1_000_000_000))
             guard !Task.isCancelled, let self else { return }
+            // Wall-clock freshness. `Task.sleep` counts suspended time as elapsed,
+            // so a Mac that slept mid-window wakes up here hours later; without
+            // this the snapshot would be compared against a completely different
+            // editing session and every difference booked as "the user corrected
+            // us" — inflating the very metric this feeds.
+            guard Date().timeIntervalSince(armedAt) < self.window * 1.5 else { return }
             // Only trust the read if the user is still in the same app; otherwise
             // the element may be gone or reused for something else entirely.
             guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == bundleID else { return }
@@ -66,7 +76,14 @@ final class CorrectionWatcher {
 
     private func evaluate(recordID: UUID, insertedText: String, before: String, after: String) {
         guard CorrectionDetector.textWasEdited(inserted: before, final: after) else { return }
-        onEdit(recordID, true)
+        // "Edited" must mean OUR sentence was changed, not that the user carried
+        // on typing after it. Comparing whole-field before/after counted the most
+        // ordinary act in dictation — dictate a line, keep writing — as an edit,
+        // which made the zero-edit rate a measure of how much people type rather
+        // than of how accurate we are.
+        if !CorrectionDetector.insertedTextSurvived(insertedText, in: after) {
+            onEdit(recordID, true)
+        }
 
         guard let correction = CorrectionDetector.detect(inserted: before, final: after) else { return }
         // The changed word must be one WE put there — otherwise the user fixed

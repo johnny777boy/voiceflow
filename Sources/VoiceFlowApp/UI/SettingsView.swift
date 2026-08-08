@@ -75,7 +75,7 @@ struct SettingsView: View {
             if !coordinator.vocabularySuggestions.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Learned from your corrections").font(.headline)
-                    Text("You've fixed these words the same way at least three times. Nothing changes until you add one.")
+                    Text("You've fixed these words the same way at least three times. Nothing changes until you add one — and adding one replaces that word in every future dictation, so only add names you always want spelled this way.")
                         .font(.caption).foregroundStyle(.secondary)
                     ForEach(coordinator.vocabularySuggestions) { suggestion in
                         HStack(spacing: 8) {
