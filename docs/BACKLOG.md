@@ -3,6 +3,55 @@
 Last updated: 2026-08-08 (late session). Read CLAUDE.md first (workflow ritual +
 product principles), then this, then docs/ROADMAP.md (phased plan to sellable).
 
+## 🤖 AUTONOMOUS RUN — approved by Yoni 2026-08-08 (execute on resume)
+
+Yoni's instruction: build the remaining upgrade phases AUTONOMOUSLY, verify with
+both reviewer agents, prepare the Codex brief + paste message, and STOP before
+merging — he tests the installed build and pastes the Codex verdict when back.
+
+**Scope (in order), all on ONE branch `feature/upgrades-phase1-5` off main:**
+1. **Phase 1 — Context biasing**: (a) verify the pinned WhisperKit contains the
+   promptTokens fix (argmax PR#514) — bump the package if not, re-audit the
+   noSpeechThreshold/suppressTokens notes on any bump; (b) enabled vocabulary →
+   Whisper promptTokens (tokenizer-encoded, < specialTokenBegin, cap length);
+   (c) AX screen-noun harvesting: frontmost window text via Accessibility →
+   extract proper nouns/unknown tokens on-device → add to the per-dictation
+   prompt (cap total prompt; log what was fed for debugging). NEVER screenshots.
+2. **Phase 2 code parts — measurement/visibility**: rawText shown next to
+   cleanText in the history UI; release-to-insert latency metric recorded per
+   dictation (hold time excluded); simple zero-edit counter if cheap. (The WER
+   recording session itself needs Yoni's voice — leave instructions, don't fake.)
+3. **Phase 3 — latency (safe parts only)**: warm/reuse the LLM session from
+   record-start; tier/skip LLM cleanup for short utterances (<~8 words) in
+   casual modes; move the 0.18s drain off the main thread WITHOUT touching tap/
+   preroll/format logic; reuse analyzer instances if safe. Two-phase delivery
+   (insert-then-refine) ONLY behind an off-by-default setting, flagged for live
+   testing. DO NOT touch the audio-capture path (CLAUDE.md rule 6).
+4. **Phase 4 — learning dictionary (propose, don't silently mutate)**: detect
+   post-insertion corrections via AX where readable (short window, on-device);
+   when the same correction recurs 2-3×, ADD to a "suggested vocabulary" list
+   surfaced in Settings ▸ Vocabulary for one-click accept. No silent auto-add.
+5. **Phase 5 — word-level dual-engine voting (conservative)**: when Whisper's
+   segment avgLogprob is low OR output contains near-miss of vocabulary terms,
+   run the Apple engine on the same clip; where the engines disagree on a word,
+   prefer the vocabulary-consistent/higher-confidence one. NEVER introduce a
+   word neither engine produced. Keep per-dictation cost bounded (skip when
+   confident). Extends the existing silence-arbiter plumbing.
+
+**Standing constraints:** keep CleanupGuard STRICT (F4 decision is Yoni's, not
+ours); English-only (languageCode plumbing untouched); every step unit-tested
+where testable; 0 warnings; commit per phase with clear messages; push the
+branch; build + install the final app (backup current /Applications copy
+first); update this backlog + status.json. Then: both reviewer agents on the
+full branch diff, fix all Critical/Important, write docs/CODEX-BRIEF-UPGRADES.md
++ a short paste message for Yoni, and STOP (no merge without his Codex PASS).
+
+**Yoni's reminder message after /clear** (also give it to him):
+"Continue VoiceFlow. Read docs/BACKLOG.md and execute the AUTONOMOUS RUN
+section per CLAUDE.md. Build everything, verify with both reviewer agents, fix
+findings, install the build for me, and give me the Codex paste message. Don't
+merge until I paste the Codex PASS."
+
 ## ✅ Phase 0 MERGED (2026-08-08) — resume with Phase 1
 `fix/consistent-chat-formatting` merged to main (merge `3a41efe`) after the full
 ritual: both reviewer agents + Codex (initial FAIL on the 1-char guard exemption
