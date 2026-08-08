@@ -27,20 +27,15 @@ public struct PerAppBehavior: Codable, Sendable, Equatable, Hashable, Identifiab
 }
 
 public extension PerAppBehavior {
-    /// Sensible per-app defaults mapping the spec's primary targets to modes.
+    /// Per-app defaults.
+    ///
+    /// CONSISTENCY RULE (user decision 2026-08-08): dictation formats IDENTICALLY
+    /// in every text box — full sentences, capitals, punctuation — chat, email,
+    /// notes, code editors, terminals, all of it. No app silently gets a
+    /// different result for the same speech. Code mode still exists as a MODE the
+    /// user can assign to an app manually in Settings, but nothing defaults to it.
+    /// (Email mode = the same full formatting + paragraph preservation.)
     static let defaults: [PerAppBehavior] = [
-        // Coding assistants & terminals → Claude Code mode.
-        PerAppBehavior(bundleIdentifier: "com.anthropic.claudefordesktop", appName: "Claude", defaultMode: .claudeCode),
-        PerAppBehavior(bundleIdentifier: "com.todesktop.230313mzl4w4u92", appName: "Claude Code", defaultMode: .claudeCode),
-        PerAppBehavior(bundleIdentifier: "com.microsoft.VSCode", appName: "VS Code", defaultMode: .claudeCode),
-        PerAppBehavior(bundleIdentifier: "com.apple.Terminal", appName: "Terminal", defaultMode: .claudeCode),
-        PerAppBehavior(bundleIdentifier: "com.googlecode.iterm2", appName: "iTerm2", defaultMode: .claudeCode),
-        // Mail & messaging → Email / Clean.
-        PerAppBehavior(bundleIdentifier: "com.apple.mail", appName: "Mail", defaultMode: .email),
-        PerAppBehavior(bundleIdentifier: "com.tinyspeck.slackmacgap", appName: "Slack", defaultMode: .cleanWriting),
-        // Browsers & notes → Clean writing.
-        PerAppBehavior(bundleIdentifier: "com.apple.Safari", appName: "Safari", defaultMode: .cleanWriting),
-        PerAppBehavior(bundleIdentifier: "com.google.Chrome", appName: "Chrome", defaultMode: .cleanWriting),
-        PerAppBehavior(bundleIdentifier: "com.apple.Notes", appName: "Notes", defaultMode: .cleanWriting)
+        PerAppBehavior(bundleIdentifier: "com.apple.mail", appName: "Mail", defaultMode: .email)
     ]
 }

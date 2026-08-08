@@ -21,6 +21,14 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
     private var pipeline: WhisperKit?
     private var suppressTokens: [Int] = []
 
+    /// Second-opinion engine for phantom suppression (the Apple engine). Whisper
+    /// invents phrases on near-silence ("Thank you.", "Thank God."); Apple's
+    /// recognizer provably emits NOTHING on the same silence. When Whisper's
+    /// whole output is a known phantom phrase, the same recording is re-checked
+    /// here: arbiter hears words ⇒ genuine speech, deliver; arbiter hears
+    /// nothing ⇒ silence, discard. Real speech can never be eaten by this veto.
+    var silenceArbiter: Transcribing?
+
     /// Thread-safe readiness check for the per-dictation route.
     var isReady: Bool {
         lock.lock(); defer { lock.unlock() }
@@ -143,18 +151,58 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         Log.transcription.notice("WhisperKit transcribed \(text.count, privacy: .public) chars")
         guard !text.isEmpty else { throw VoiceFlowError.emptyTranscript }
 
-        // Phantom-phrase post-filter: catches the hallucinations that pass the
-        // energy gate (breaths/noise with real energy). Whole-output match plus a
-        // corroborating doubt signal required — see TranscriptSanity for the
-        // safety analysis. A confidently transcribed audible "Thank you." passes.
+        // Phantom-phrase suppression. Whisper's signature failure: short/quiet
+        // clips decode to YouTube-outro phrases ("Thank you.", "Thank God.").
+        // Confidence/energy thresholds proved too weak in live testing (2026-08-08:
+        // both phrases shipped despite the corroboration filter), so the primary
+        // defense is now a SECOND OPINION: when the whole output is a phantom-
+        // family phrase, re-run the same recording through the Apple engine.
+        // Apple emits nothing on silence (proven live on this machine), so:
+        // words ⇒ user really spoke ⇒ deliver; nothing ⇒ discard the phantom.
+        // This cannot eat real speech — a real "Thank you" passes the re-check.
+        let clipSeconds = Double(samples.count) / 16_000.0
         let minLogProb = results.flatMap { $0.segments }.map { $0.avgLogprob }.min()
-        if TranscriptSanity.isLikelyHallucination(
-            text: text,
-            minAvgLogProb: minLogProb,
-            nearSilence: maxChunkRMS < 0.01
-        ) {
-            Log.transcription.notice("Whisper post-filter: dropped probable hallucination \"\(text, privacy: .public)\" (logProb=\(minLogProb ?? 0, privacy: .public) maxRMS=\(maxChunkRMS, privacy: .public))")
-            throw VoiceFlowError.emptyTranscript
+        // Suspicious = YouTube-outro boilerplate at ANY length (never deliberate
+        // dictation), OR any tiny output from a short clip (live evidence
+        // 2026-08-08: a 2s silent hold decoded to just "Thank" — not on any
+        // list — which cleanup then completed to "Thank you."). Deliberate long
+        // dictations of everyday phrases ("Thank you so much.") are NOT
+        // arbitrated — a wrongful veto there would silently eat real speech.
+        // Short real utterances ("yes", "okay send it") are safe: the arbiter
+        // hears them and approves (proven live same day).
+        let wordCount = text.split(whereSeparator: { $0 == " " }).count
+        let suspicious = TranscriptSanity.isOutroPhrase(text)
+            || (clipSeconds <= 3.0 && wordCount <= 4)
+        if suspicious {
+            Log.transcription.notice("Whisper phantom candidate \"\(text, privacy: .public)\" (dur=\(clipSeconds, privacy: .public)s logProb=\(minLogProb ?? 0, privacy: .public) maxRMS=\(maxChunkRMS, privacy: .public)) — asking arbiter")
+            var arbiterUnavailable = silenceArbiter == nil
+            if let arbiter = silenceArbiter {
+                do {
+                    // Consumes + deletes the capture file via the engine's own path.
+                    _ = try await arbiter.transcribe(audio, languageCode: languageCode)
+                    Log.transcription.notice("Arbiter heard speech — delivering Whisper text")
+                    return VoiceFlowCore.TranscriptionResult(text: text)
+                } catch VoiceFlowError.emptyTranscript {
+                    // The one verdict that means "silence": discard the phantom.
+                    Log.transcription.notice("Arbiter heard nothing — phantom discarded")
+                    throw VoiceFlowError.emptyTranscript
+                } catch is CancellationError {
+                    throw CancellationError()   // a cancelled dictation stays cancelled
+                } catch {
+                    // Infrastructure failure (model asset, file read, analyzer) is
+                    // NOT a silence verdict — a real "Yes." must not be eaten
+                    // because Apple's model was mid-download. Fall through to the
+                    // signal-based filter instead.
+                    Log.transcription.error("Arbiter unavailable (\(String(describing: error), privacy: .public)) — using corroboration filter")
+                    arbiterUnavailable = true
+                }
+            }
+            // No (working) arbiter: drop only with corroborating doubt signals.
+            if arbiterUnavailable, TranscriptSanity.isLikelyHallucination(
+                text: text, minAvgLogProb: minLogProb, nearSilence: maxChunkRMS < 0.01
+            ) {
+                throw VoiceFlowError.emptyTranscript
+            }
         }
         // Success: the capture file is consumed here. On ANY failure above we leave
         // the file alone — the FallbackTranscriber re-runs the Apple engine, which

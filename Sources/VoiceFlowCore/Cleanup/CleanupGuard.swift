@@ -25,46 +25,84 @@ public enum CleanupGuard {
         //    words are short. This is the critical safety check.
         if negationCount(original) != negationCount(cleaned) { return false }
 
-        // 3. Every number in the input must survive (no "$3.14" → "$4.15", no dropped
-        //    quantities/dates).
-        if !numbers(original).isSubset(of: numbers(cleaned)) { return false }
+        // 3. Numbers must match EXACTLY in both directions: none dropped
+        //    ("$3.14" → "$4.15") and none invented (cleanup may not add digits
+        //    the user never spoke).
+        if numbers(original) != numbers(cleaned) { return false }
 
-        // 4. No invented content words. A homophone swap ("pill" → "peel",
-        //    "check" → "czech") or added content ("…first thing tomorrow") passes
-        //    every check above but fabricates words the user never spoke — the
-        //    exact failure the verbatim goal forbids. A cleaned content word is
-        //    allowed only if it appeared in the original OR shares a stem with an
-        //    original word (so legitimate grammar fixes like "interesting for
-        //    discuss" → "interested in discussing" still pass).
-        let originalSignificant = significantWords(original)
-        let inSet = Set(originalSignificant)
-        for word in significantWords(cleaned) where !inSet.contains(word) {
-            if word.allSatisfy({ $0.isNumber }) { continue }   // digits guarded in step 3
-            if !sharesStem(word, withAnyOf: originalSignificant) { return false }
+        // 4. BIDIRECTIONAL verbatim check (tightened 2026-08-08 after live-use
+        //    evidence: cleanup invented "you" in 'Thank'→'Thank you.' through the
+        //    short-word exemption, and DELETED 'It keeps saying' entirely —
+        //    deletions were previously unguarded).
+        //
+        //    4a. No invented words, of ANY length. A cleaned word is allowed only
+        //        if it appeared in the original or is a morphological variant of
+        //        an original word ("go"→"going", "discuss"→"discussing").
+        let originalWords = allWords(original)
+        let originalSet = Set(originalWords)
+        // Only tokens that literally follow an apostrophe in the cleaned text
+        // ("don't" → shard "t") are contraction shards — a blanket 1-char pass
+        // would let cleanup invent "I"/"a" (Codex verification finding).
+        let shards = contractionShards(cleaned)
+        for word in allWords(cleaned) where !originalSet.contains(word) {
+            if shards.contains(word) { continue }              // "don't" → "don","t"
+            if word.allSatisfy({ $0.isNumber }) { continue }   // digit sets equal per step 3
+            if !sharesStem(word, withAnyOf: originalWords) { return false }
         }
 
-        // 5. Loose topical overlap — only to catch a total rewrite about something
-        //    else. Deliberately low so real grammar rewrites are NOT rejected.
-        let significant = originalSignificant
-        if significant.count >= 5 {
-            let kept = Set(significantWords(cleaned))
-            let survived = significant.filter { kept.contains($0) }.count
-            if Double(survived) / Double(significant.count) < 0.3 { return false }
+        //    4b. No deleted content words. Every significant original word must
+        //        survive (or a variant of it). Hesitation fillers are exempt —
+        //        removing "um" is the one deletion cleanup is FOR.
+        let cleanedWords = allWords(cleaned)
+        let cleanedSet = Set(cleanedWords)
+        for word in significantWords(original) where !cleanedSet.contains(word) {
+            if TextNormalizer.fillerWords.contains(word) { continue }
+            if !sharesStem(word, withAnyOf: cleanedWords) { return false }
         }
         return true
     }
 
-    /// True when `word` looks like a morphological variant of some original word:
-    /// a shared prefix of ≥4 chars covering at least half of the shorter word.
-    /// "discussing"~"discuss" and "interested"~"interesting" pass; homophones
-    /// like "peel"~"pill", "czech"~"check", "tank"~"bank" do not.
+    /// True when `word` looks like a morphological variant of some candidate:
+    /// for short words (≤4 chars) one must be a prefix of the other ("go"~
+    /// "going", "you"~"your"); for longer words, a shared prefix of ≥4 chars
+    /// covering at least half of the shorter word ("discussing"~"discuss").
+    /// Homophones like "peel"~"pill", "czech"~"check", "tank"~"bank" fail both.
     private static func sharesStem(_ word: String, withAnyOf candidates: [String]) -> Bool {
-        for other in candidates {
+        for other in candidates where other != word {
             let common = zip(word, other).prefix { $0 == $1 }.count
             let shorter = min(word.count, other.count)
-            if common >= 4, common * 2 >= shorter { return true }
+            if shorter <= 4 {
+                if common == shorter, common >= 2 { return true }   // prefix relation
+            } else if common >= 4, common * 2 >= shorter {
+                return true
+            }
         }
         return false
+    }
+
+    /// Every alphanumeric word, lowercased (no length filter).
+    static func allWords(_ text: String) -> [String] {
+        text.lowercased()
+            .split { !($0.isLetter || $0.isNumber) }
+            .map(String.init)
+    }
+
+    /// Letter-runs that immediately follow an apostrophe (' or ’) after a letter
+    /// — the fragments produced when `allWords` splits a contraction: "don't" →
+    /// "t", "we'll" → "ll", "it's" → "s". Only these may appear as "new" words.
+    static func contractionShards(_ text: String) -> Set<String> {
+        var shards = Set<String>()
+        let lower = Array(text.lowercased())
+        for i in lower.indices where lower[i] == "'" || lower[i] == "\u{2019}" {
+            guard i > lower.startIndex, lower[i - 1].isLetter else { continue }
+            var j = i + 1
+            var shard = ""
+            while j < lower.endIndex, lower[j].isLetter {
+                shard.append(lower[j]); j += 1
+            }
+            if !shard.isEmpty { shards.insert(shard) }
+        }
+        return shards
     }
 
     // MARK: - Helpers

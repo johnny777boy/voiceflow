@@ -8,6 +8,18 @@ import VoiceFlowCore
 /// Never pastes into a secure field.
 final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
 
+    // Continuation memory for the leading-space decision. Web/Electron text boxes
+    // (Claude, browsers, Slack…) often hide their contents from Accessibility, so
+    // the caret can't be inspected there — but if WE just inserted text ending in
+    // a word into the same app moments ago, the caret is sitting right after it,
+    // and a follow-up dictation must get its gap (Wispr behavior: word before
+    // caret ⇒ always a space). Guarded by app identity + a short freshness window.
+    private let memoryLock = NSLock()
+    private var lastInsertedAt: Date?
+    private var lastInsertionBundleID: String?
+    private var lastPayloadEndedInWhitespace = false
+    private var preparedBundleID: String?
+
     func currentCapabilities() -> DestinationCapabilities {
         // Attempt insertion for any non-secure destination. AX role detection is
         // unreliable across apps (Notes, Electron, browsers), so we don't gate on
@@ -30,6 +42,11 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
     }
 
     func prepareForInsertion(intoBundleIdentifier bundleIdentifier: String?) {
+        // Record the target FIRST — even for the early-return cases — so the
+        // continuation memory never compares against a stale previous app.
+        memoryLock.lock()
+        preparedBundleID = bundleIdentifier
+        memoryLock.unlock()
         guard let bundleIdentifier, bundleIdentifier != VoiceFlowInfo.bundleIdentifier else { return }
         let activate: @Sendable () -> Void = {
             let ws = NSWorkspace.shared
@@ -56,7 +73,15 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
         // leading space so words don't glue together ("world" + "how" → "world how").
         // Computed once here; the recursive fallthrough reuses the same payload.
         let payload = strategy == .copyOnly ? text : leadingSpaceIfNeeded() + text
-        return try deliver(payload, using: strategy)
+        let outcome = try deliver(payload, using: strategy)
+        if outcome.didInsert {
+            memoryLock.lock()
+            lastInsertedAt = Date()
+            lastInsertionBundleID = preparedBundleID
+            lastPayloadEndedInWhitespace = payload.last?.isWhitespace ?? true
+            memoryLock.unlock()
+        }
+        return outcome
     }
 
     private func deliver(_ text: String, using strategy: InsertionStrategy) throws -> InsertionOutcome {
@@ -91,14 +116,36 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
 
     /// A single leading space when the caret sits right after existing, non-space
     /// text — so a follow-up dictation continues cleanly instead of gluing on.
-    /// Empty when we can't read the field (safe: no change) or when a space/newline/
-    /// opening bracket already precedes the caret.
+    ///
+    /// Two tiers:
+    ///  1. Read the caret via Accessibility (exact — works in native apps).
+    ///  2. When the field HIDES its text from AX (web/Electron boxes: Claude,
+    ///     browsers…), fall back to continuation memory: we inserted word-ending
+    ///     text into this same app within the last 2 minutes ⇒ the caret sits
+    ///     right after it ⇒ gap. (Live regression 2026-08-08: "issue.When" glue
+    ///     in the Claude chat box, where tier 1 returns nothing.)
+    /// The worst case of tier 2 — a stray leading space in a freshly-emptied
+    /// box — is far less harmful than words gluing, and chat apps trim it on send.
     private func leadingSpaceIfNeeded() -> String {
-        guard let focused = AX.focusedElement(),
-              let before = AX.characterBeforeCaret(focused) else { return "" }
-        if before.isWhitespace || before.isNewline { return "" }
-        if "([{\u{201C}\u{2018}\"'".contains(before) { return "" }   // after ( " ' etc.
-        return " "
+        if let focused = AX.focusedElement() {
+            if let before = AX.characterBeforeCaret(focused) {
+                if before.isWhitespace || before.isNewline { return "" }
+                if "([{\u{201C}\u{2018}\"'".contains(before) { return "" }   // after ( " ' etc.
+                return " "
+            }
+            // The field is READABLE but has no char before the caret (empty box,
+            // or caret at position 0): definitively no space — tier-2 memory must
+            // NOT fire here (it would indent fresh notes / prepended text).
+            if AX.string(focused, kAXValueAttribute) != nil { return "" }
+        }
+        // Field genuinely unreadable (web/Electron): fall back to memory.
+        memoryLock.lock(); defer { memoryLock.unlock() }
+        if let at = lastInsertedAt, Date().timeIntervalSince(at) < 120,
+           let last = lastInsertionBundleID, last == preparedBundleID,
+           !lastPayloadEndedInWhitespace {
+            return " "
+        }
+        return ""
     }
 
     /// Whether the *currently* focused element is a secure (password) field.

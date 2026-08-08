@@ -82,6 +82,45 @@ func runVerbatimTests(_ s: TestSuite) {
             text: "Thank you.", minAvgLogProb: nil, nearSilence: false))
     }
 
+    s.test("settings migration strips legacy seeded code-mode rows, keeps user rules") { s in
+        var old = AppSettings.default
+        old.perAppBehaviors = [
+            // Legacy seeded rows (old defaults) — must be removed.
+            PerAppBehavior(bundleIdentifier: "com.anthropic.claudefordesktop", appName: "Claude", defaultMode: .claudeCode),
+            PerAppBehavior(bundleIdentifier: "com.apple.Terminal", appName: "Terminal", defaultMode: .claudeCode),
+            PerAppBehavior(bundleIdentifier: "com.apple.Notes", appName: "Notes", defaultMode: .cleanWriting),
+            // Hand-flipped variant of a seeded row — also removed.
+            PerAppBehavior(bundleIdentifier: "com.microsoft.VSCode", appName: "VS Code", defaultMode: .cleanWriting),
+            // GENUINE user rules — must survive: custom app, custom mode, copy-only.
+            PerAppBehavior(bundleIdentifier: "com.mycompany.tool", appName: "MyTool", defaultMode: .claudeCode),
+            PerAppBehavior(bundleIdentifier: "com.apple.Safari", appName: "Safari", defaultMode: .cleanWriting, forceCopyOnly: true),
+        ]
+        let migrated = SettingsStore.migrate(old)
+        let ids = migrated.perAppBehaviors.map(\.bundleIdentifier)
+        s.expectEqual(ids.sorted(), ["com.apple.Safari", "com.mycompany.tool"])
+        // Post-migration resolution is uniform: Terminal/Claude → Clean Writing.
+        s.expectEqual(migrated.mode(forBundleIdentifier: "com.apple.Terminal"), .cleanWriting)
+        s.expectEqual(migrated.mode(forBundleIdentifier: "com.anthropic.claudefordesktop"), .cleanWriting)
+        s.expectEqual(migrated.mode(forBundleIdentifier: "com.mycompany.tool"), .claudeCode)
+    }
+
+    s.test("CleanupGuard: 1-char exemption is contraction-shards ONLY (Codex finding)") { s in
+        // A bare invented "I"/"a" must be rejected — the shard exemption applies
+        // only to letters that literally follow an apostrophe in the cleaned text.
+        s.expectFalse(CleanupGuard.preservesMeaning(original: "go now", cleaned: "I go now"))
+        s.expectFalse(CleanupGuard.preservesMeaning(original: "send report", cleaned: "send a report"))
+        // Real contraction shards still pass, straight or curly apostrophe.
+        s.expect(CleanupGuard.preservesMeaning(original: "do not touch it", cleaned: "Don't touch it."))
+        s.expect(CleanupGuard.preservesMeaning(original: "it is fine", cleaned: "It\u{2019}s fine."))
+    }
+
+    s.test("CleanupGuard rejects invented numbers (both directions exact)") { s in
+        s.expectFalse(CleanupGuard.preservesMeaning(
+            original: "send the report", cleaned: "send the 2 reports"))
+        s.expect(CleanupGuard.preservesMeaning(
+            original: "review version 3.14 now", cleaned: "Review version 3.14 now."))
+    }
+
     s.test("settings decode tolerates old settings.json without the new key") { s in
         // Simulate a settings.json written by an older build: encode current
         // settings, delete the new key, and decode — must not throw or reset.

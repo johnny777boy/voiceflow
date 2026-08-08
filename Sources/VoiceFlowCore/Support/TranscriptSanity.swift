@@ -19,17 +19,61 @@ public enum TranscriptSanity {
     /// NORMALIZED full transcript.
     public static let phantomPhrases: Set<String> = [
         "thank you",
+        "thank you thank you",
+        "thank you very much",
+        "thank you so much",
+        "thank god",
+        "oh thank god",
         "thanks for watching",
         "thank you for watching",
         "thank you so much for watching",
+        "thank you for listening",
+        "thanks a lot",
         "thanks",
         "bye",
+        "bye bye",
+        "see you",
+        "see you later",
+        "see you next time",
+        "okay",
+        "so",
         "you",
+        "the end",
+        "oh my god",
         "please subscribe",
+        "please like and subscribe",
         "subtitles by the amara org community",
         "subtitles by the amaraorg community",
-        "thank you for listening",
     ]
+
+    /// Whole-output membership in the phantom family. Used to trigger the
+    /// second-opinion arbiter — safe to be generous here, because a match alone
+    /// never drops anything; it only prompts an independent listen.
+    public static func isPhantomPhrase(_ text: String) -> Bool {
+        phantomPhrases.contains(normalized(text))
+    }
+
+    /// The subset that is essentially NEVER deliberate dictation — YouTube-outro
+    /// and subtitle-credit boilerplate. Only these justify arbitration at ANY
+    /// clip length; everyday phrases ("okay", "thank you", "bye") are legitimate
+    /// dictations when spoken deliberately over a longer clip, and are checked
+    /// only under the short-clip suspicion arm (adversarial-review finding F1:
+    /// an any-length check risked eating a real long "Thank you so much.").
+    public static let outroPhrases: Set<String> = [
+        "thanks for watching",
+        "thank you for watching",
+        "thank you so much for watching",
+        "thank you for listening",
+        "please subscribe",
+        "please like and subscribe",
+        "subtitles by the amara org community",
+        "subtitles by the amaraorg community",
+        "the end",
+    ]
+
+    public static func isOutroPhrase(_ text: String) -> Bool {
+        outroPhrases.contains(normalized(text))
+    }
 
     /// Lowercase, strip everything but letters/digits/spaces, collapse whitespace.
     public static func normalized(_ text: String) -> String {

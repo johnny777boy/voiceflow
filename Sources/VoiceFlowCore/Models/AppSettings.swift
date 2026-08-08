@@ -90,10 +90,10 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public static let `default` = AppSettings()
 
     /// Resolve the effective mode for a destination. Priority: an explicit per-app
-    /// rule the user set > automatic best-fit for the app > the global default.
-    /// The auto step means the right mode is chosen everywhere without the user
-    /// managing it: code/terminal apps keep tokens literal, mail keeps paragraphs,
-    /// and everything else gets polished Clean Writing.
+    /// rule the user set > automatic best-fit > the global default. Under the
+    /// uniform-formatting policy the auto step yields Email for mail apps and
+    /// Clean Writing for everything else — identical formatting everywhere;
+    /// code mode happens only when the user explicitly assigns it to an app.
     public func mode(forBundleIdentifier bundleID: String?) -> DictationMode {
         if let bundleID,
            let rule = perAppBehaviors.first(where: { $0.bundleIdentifier == bundleID }) {
@@ -105,28 +105,21 @@ public struct AppSettings: Codable, Sendable, Equatable {
         return defaultMode
     }
 
-    /// Best-fit mode for a bundle id, or nil if we have no strong opinion (caller
-    /// falls back to the global default). Code editors/terminals → code mode; mail
-    /// apps → email; common prose apps (chat, browsers, notes, docs) → Clean Writing.
+    /// Best-fit mode for a bundle id. CONSISTENCY RULE (user decision 2026-08-08):
+    /// the same speech produces the same text in EVERY app — no destination
+    /// silently downgrades formatting. Mail apps get Email mode (identical
+    /// formatting, plus paragraph preservation); everything else — chat, notes,
+    /// browsers, code editors, terminals — gets Clean Writing. Code mode is
+    /// only ever reached via an explicit per-app rule the user sets.
     public static func autoMode(forBundleIdentifier bundleID: String) -> DictationMode? {
         let id = bundleID.lowercased()
-        // EXACT bundle-id match only — a substring match ("mail", "terminal") would
-        // misclassify unrelated apps (com.example.mailroomInventory). Unknown apps
-        // fall through to Clean Writing, which is the safe default for prose.
-        let codeApps: Set<String> = [
-            "com.microsoft.vscode", "com.microsoft.vscodeinsiders", "com.vscodium",
-            "com.visualstudio.code.oss", "com.todesktop.230313mzl4w4u92",   // Cursor
-            "com.apple.terminal", "com.googlecode.iterm2", "dev.warp.warp-stable",
-            "com.apple.dt.xcode", "com.jetbrains.intellij", "com.jetbrains.pycharm",
-            "com.sublimetext.4", "com.sublimetext.3", "com.github.atom", "co.zeit.hyper"
-        ]
-        if codeApps.contains(id) { return .claudeCode }
+        // EXACT bundle-id match only — a substring match ("mail") would
+        // misclassify unrelated apps (com.example.mailroomInventory).
         let mailApps: Set<String> = [
             "com.apple.mail", "com.microsoft.outlook", "com.readdle.smartemail-mac",
             "com.airmailapp.airmail", "ru.keepcoder.telegram.mail", "com.sparkmailapp.spark"
         ]
         if mailApps.contains(id) { return .email }
-        // Chat / browsers / notes / docs — prose destinations → polished writing.
         return .cleanWriting
     }
 

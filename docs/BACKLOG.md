@@ -1,10 +1,30 @@
 # VoiceFlow — Backlog & Handoff (resume point)
 
-Last updated: 2026-08-07 (evening session). Read this first to continue work in a
-fresh session. **Read docs/WISPR_GAP_FINDINGS.md too** — 4-agent research answered
-"where is the Wispr gap": it's the acoustic model (Wispr = cloud large-model ASR +
-context biasing; Apple's engine is whisper-small-class), plus several self-inflicted
-cleanup errors listed there.
+Last updated: 2026-08-08 (late session). Read CLAUDE.md first (workflow ritual +
+product principles), then this, then docs/ROADMAP.md (phased plan to sellable).
+
+## ⏸️ RESUME HERE — Phase 0 merge is one Codex verdict away
+Branch `fix/consistent-chat-formatting` (head `0b6eb26`, pushed, INSTALLED as the
+running app): uniform formatting everywhere + phantom-killer (Apple-engine
+arbiter) + bidirectional verbatim guard + continuation-gap memory + settings
+migration + framework docs. Verified by BOTH reviewer agents; every Critical/
+Important finding fixed (commit 0b6eb26). 108 tests, 0 warnings.
+**Waiting ONLY on: Yoni pastes the Codex verdict** (brief:
+docs/CODEX-BRIEF-FORMATTING-MERGE.md, verify current branch HEAD). On PASS →
+merge ritual (tag pre-formatting-merge → merge --no-ff → test → tag verified →
+push → rebuild+reinstall). Then Phase 1 (context biasing) on a fresh branch.
+
+**Decisions queued for Yoni (do not act without him):**
+1. Guard strictness (adversarial F4): the bidirectional guard rejects most
+   grammar-level cleanups (number-words→digits, gonna→going to, irregular verbs
+   go→went), so LLM cleanup ≈ punctuation pass. Options: keep strict (current,
+   verbatim-first) / add narrow equivalences (numbers, irregular verbs — but NOT
+   function-word insertions, that's how 'Thank'→'Thank you.' happened) / a
+   "grammar help" cleanup level. His accent makes this a real tradeoff.
+2. Multi-language: market research says table stakes; his policy is English-now,
+   Hebrew-secondary-later. Roadmap documents the tension.
+3. Watch item (adversarial F3): short dictations pay Whisper+Apple serially
+   (~1-2s extra). If "yes"-type replies feel slow, Phase 3 latency work rises.
 
 ## Current state
 - **`main` = MERGED Whisper version (2026-08-08)** — the Whisper branch was merged
