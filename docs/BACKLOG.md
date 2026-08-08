@@ -7,16 +7,13 @@ context biasing; Apple's engine is whisper-small-class), plus several self-infli
 cleanup errors listed there.
 
 ## Current state
-- **`main` — the STABLE, working version** (code unchanged from `761cd84`; docs-only
-  commits since). Fast Apple SpeechAnalyzer engine, on-device cleanup, insertion,
-  all fixes below. Codex-verified (2 rounds), 93 tests pass, 0 warnings.
-- **Whisper work is on branch `feature/system-dictation-daily-use` (`dee4585`)**, pushed
-  to GitHub, NOT merged. Open Item #1's blocker is now FIXED in code: background
-  model download with progress UI (Settings ▸ Privacy & AI), Apple-engine fallback
-  until Whisper is ready and on any Whisper failure (FallbackTranscriber, tested),
-  correct model name `openai_whisper-large-v3-v20240930_turbo` (the old
-  "large-v3-turbo" matched nothing on HF and always failed), tuned decode options.
-  98 tests pass, 0 warnings. **Remaining: live-mic validation + WER A/B** (below).
+- **`main` = MERGED Whisper version (2026-08-08)** — the Whisper branch was merged
+  after TRIPLE verification (senior reviewer agent + adversarial concurrency agent
+  + Codex external PASS on `93c59ae`). 106 tests, 0 warnings. Running live on the
+  user's machine, model downloaded (1.5GB), user-confirmed working well.
+- Tags: `verified-2026-08-08-whisper` (current) · `pre-whisper-merge-2026-08-08`
+  (instant rollback: `git reset --hard pre-whisper-merge-2026-08-08`).
+- The branch is fully merged; future work continues on new branches off main.
 - Repo: github.com/johnny777boy/voiceflow. Worktree:
   `.worktrees/feature-system-dictation-daily-use`.
 
