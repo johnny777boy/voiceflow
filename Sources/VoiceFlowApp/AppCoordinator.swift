@@ -172,6 +172,25 @@ final class AppCoordinator: ObservableObject {
                 }
             }
         }
+
+        // Self-heal after sleep: macOS can silently disable a global event tap
+        // across a sleep/wake cycle, leaving the hotkey dead until the user
+        // happens to click the app (didBecomeActive). Rebuild the tap on every
+        // wake — for a menu-bar app that may never be "activated", this is the
+        // only reliable trigger. Slight delay lets the system settle first.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                guard let self else { return }
+                self.refreshPermissionStatus()
+                if self.accessibilityGranted, self.inputMonitoringGranted {
+                    self.registerHotkey()
+                    Log.hotkey.notice("Rebuilt hotkey tap after wake")
+                }
+            }
+        }
     }
 
     private func refreshPermissionStatus() {
