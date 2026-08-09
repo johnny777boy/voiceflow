@@ -45,6 +45,21 @@ func runContextBiasTests(_ suite: TestSuite) {
         s.expectEqual(TranscriptSanity.wordOverlap("", "anything"), 0)
     }
 
+    suite.test("echo: an echo that swallows the one word actually said is not agreement") { s in
+        // Codex round-2 FAIL: measuring against the SHORTER transcript made a
+        // subset score a perfect 1.0. The user says "Sarah"; Whisper echoes the
+        // whole glossary; the other engine correctly hears only "Sarah". Scoring
+        // that as agreement delivered the entire echo — words never spoken.
+        s.expect(TranscriptSanity.wordOverlap(
+            "Sarah Kubernetes Payload CMS Grafana", "Sarah") < 0.5)
+        // ...and it must not matter which way round the arguments come.
+        s.expect(TranscriptSanity.wordOverlap(
+            "Sarah", "Sarah Kubernetes Payload CMS Grafana") < 0.5)
+        // A near-identical pair still agrees.
+        s.expect(TranscriptSanity.wordOverlap(
+            "send it to Sarah today", "send it to Sara today") >= 0.5)
+    }
+
     // MARK: - TranscriptionContext
 
     suite.test("context: vocabulary comes before screen terms and dedupes case-insensitively") { s in

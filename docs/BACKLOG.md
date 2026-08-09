@@ -3,11 +3,33 @@
 Last updated: 2026-08-08 (late session). Read CLAUDE.md first (workflow ritual +
 product principles), then this, then docs/ROADMAP.md (phased plan to sellable).
 
-## ✅ AUTONOMOUS RUN COMPLETE — Codex round 1 FAIL fixed, awaiting re-verification
+## 🔤 Vocabulary is EMPTY — the single highest-value thing Yoni can do
+
+`defaults read com.voiceflow.dictation vocabulary` returns nothing: there are no
+entries at all, while `useWhisperEngine = 1` (large-v3 turbo, downloaded). So
+Phase 1's biasing is running with none of HIS words to bias toward — it only has
+screen-harvested nouns. This is why "Codex" comes out as "codices" (a real English
+word, so the recognizer never self-corrects) and why other proper nouns keep
+failing. One entry — spoken `codices` → written `Codex` — both feeds `Codex` to
+Whisper as a prompt token AND rewrites the miss. Phase 4 now offers such entries
+automatically after three hand-corrections (capitalized ⇒ passes the name-shaped
+gate). Ask him for his list of mangled terms and write them in.
+
+## ✅ AUTONOMOUS RUN COMPLETE — Codex FAILed twice (both fixed), awaiting round 3
 
 Phases 1–5 built, reviewed, fixed, and INSTALLED. `feature/upgrades-phase1-5`.
 173 tests, 0 warnings (debug + release). App rebuilt from the branch and installed
 to `/Applications/VoiceFlow.app` (relaunched, running).
+
+**Codex round 2 (`c48db01`) returned FAIL — confirmed the capture fix, then found
+the agreement check I added to make echo false-positives harmless was itself
+broken:** `wordOverlap` divided by the SHORTER transcript, so a subset scored a
+perfect 1.0. User says only "Sarah", Whisper echoes "Sarah Kubernetes Payload CMS
+Grafana", the arbiter correctly hears "Sarah" → declared agreement → the whole
+echo delivered. **Fixed:** divide by `max(a.count, b.count)`, so both transcripts
+must be covered; two regression tests pin it. Consequence accepted on purpose:
+genuine disagreement now prefers the arbiter and can drop a word the other engine
+heard — inserting unspoken words is unacceptable, losing one is not.
 
 **Codex round 1 (`fab60de`) returned FAIL — one blocking defect, correctly found:**
 prompt-echo recovery could lose real speech. The Apple arbiter took the recorder's

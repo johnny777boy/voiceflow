@@ -14,7 +14,32 @@ macOS 26, SwiftPM, Command Line Tools only — there is no Xcode and no XCTest o
 this machine. The suite is a plain executable target; that is deliberate, not a
 gap to flag.
 
-## Round 2 — what changed since your FAIL
+## Round 3 — what changed since your round-2 FAIL
+
+You confirmed the capture-ownership fix, then returned **FAIL** on the agreement
+check I had added to make echo false-positives harmless. You were right again:
+
+> `TranscriptSanity.swift:124` — `wordOverlap` divides by the shorter transcript's
+> distinct word count, so a subset match looks like full agreement. User says only
+> "Sarah"; Whisper echoes "Sarah Kubernetes Payload CMS Grafana"; the arbiter
+> correctly hears "Sarah"; overlap returns 1.0, echo suspicion is cleared, and the
+> full echo is delivered.
+
+**Fix:** `wordOverlap` now divides by `max(a.count, b.count)`, so both transcripts
+must be substantially covered and text only ONE engine produced always counts
+against agreement. The failure scenario now scores 0.2 and is correctly treated as
+an echo. Two regression tests pin it, including the argument-order-swapped case.
+
+Consequence worth attacking: when the engines genuinely disagree the caller now
+prefers the arbiter (the engine with no prompt to echo), which can mean dropping a
+word the other engine heard — e.g. if the Apple engine under-transcribes. That
+asymmetry is deliberate and matches the product rule (inserting words the user
+never said is unacceptable; losing one is not), but tell me if you can construct a
+realistic case where it costs real speech often enough to matter.
+
+174 tests, 0 warnings.
+
+## Round 2 — what changed since your round-1 FAIL
 
 You returned **FAIL** on round 1 (`fab60de`) with one blocking defect, and you
 were right:
