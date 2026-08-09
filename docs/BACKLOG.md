@@ -29,7 +29,11 @@ tags. Seven Codex rounds total: six FAILs (all real, all in prompt-echo
 recovery), then PASS with probes confirming .NET/#Swift/+Type/.38/push-to-talk
 tokenization and the capture lifecycle.
 
-## 🎤 NOW IN LIVE TEST — mic idle-release (`feature/mic-idle-timeout`, installed)
+## 🎤 LIVE TEST PASSED (Yoni, 2026-08-09): light off at ~3 min; engine restarted
+on his next dictation (audio-in assertion observed 19s old); first word intact.
+Reviewer agents running on the mic diff → then Codex brief → then merge.
+
+## Mic idle-release details (`feature/mic-idle-timeout`, installed)
 
 The installed app = main + the idle-release fix (branch pushed, 178 tests, 0
 warnings). Engine releases the mic 3 minutes after the last dictation → orange

@@ -42,10 +42,17 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
                     if self.engine != nil, !self.isRecording { self.scheduleIdleRelease() }
                 } else {
                     self.cancelIdleTimer()
+                    // Off promises the ORIGINAL always-warm behavior. If the
+                    // engine was already idle-released, restore it now — not on
+                    // some future activation — or the first dictation after the
+                    // toggle still cold-starts despite the setting.
+                    if !self.isRecording { try? self.startEngineIfNeeded() }
                 }
             }
         }
     }
+
+    deinit { idleTimer?.invalidate() }   // the run loop retains a pending timer
     /// How long without a dictation before the mic is released.
     var idleReleaseInterval: TimeInterval = 180
     private var idleTimer: Timer?
@@ -58,7 +65,11 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
     /// main-thread paths that start/stop recording, so there is no racing writer.
     private func scheduleIdleRelease() {
         cancelIdleTimer()
-        guard idleReleaseEnabled else { return }
+        // Never arm while a capture is running. `prewarm` can be invoked by an
+        // app-activation in the window where audio is already recording but the
+        // coordinator's published flag hasn't flipped yet; an armed timer there
+        // would count down through the whole dictation.
+        guard idleReleaseEnabled, !isRecording else { return }
         let timer = Timer(timeInterval: idleReleaseInterval, repeats: false) { [weak self] _ in
             self?.releaseEngineIfIdle()
         }
@@ -79,6 +90,7 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
     /// tap that is writing the user's audio.
     private func releaseEngineIfIdle() {
         guard !isRecording, let engine else { return }
+        idleTimer = nil   // the one-shot has fired; don't let it read as pending
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         self.engine = nil
@@ -147,6 +159,14 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
             Log.transcription.notice("SA WARNING: low input rate \(fmt.sampleRate) Hz — a Bluetooth/headset mic degrades accuracy; prefer the built-in mic.")
         }
 
+        // A fresh engine starts with an EMPTY pre-roll ring. `removeTap` does not
+        // synchronize with a tap callback already executing on the render thread,
+        // so a straggler from the released engine can append one final ~21ms
+        // buffer after the release cleared the ring; without this, that stale
+        // room tone would be written at the head of the next capture.
+        lock.lock()
+        preroll.removeAll(keepingCapacity: false)
+        lock.unlock()
         input.installTap(onBus: 0, bufferSize: 1024, format: fmt) { [weak self] buffer, _ in
             self?.handleTap(buffer)
         }
@@ -182,6 +202,12 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
 
     private func startRecordingImpl() throws {
         cancelIdleTimer()           // a dictation is the definition of "not idle"
+        // Both reviewers found the same hole: if anything below THROWS (a failed
+        // engine start, an unopenable capture file), the method exits with the
+        // timer already cancelled — a warm engine and a lit indicator that
+        // nothing will ever release. The failure path must re-arm.
+        var started = false
+        defer { if !started, engine != nil { scheduleIdleRelease() } }
         try startEngineIfNeeded()   // warm already, unless idle-released or first use
         guard let fmt = tapFormat else {
             throw VoiceFlowError.audioEngineFailure("Audio not ready.")
@@ -206,6 +232,7 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
         recording = true
         lock.unlock()
         isRecording = true
+        started = true
         // Diagnostic: warm=true + a non-zero pre-roll means the opening audio IS being
         // captured (so any first-word error is recognition, not clipping).
         Log.transcription.notice("SA record: warm=\(self.engine != nil, privacy: .public) prerollFrames=\(prerollFrames, privacy: .public)")
@@ -237,7 +264,13 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
     func stopRecording() throws -> AudioCapture { try onMain { try self.stopRecordingImpl() } }
 
     private func stopRecordingImpl() throws -> AudioCapture {
-        guard isRecording else { return AudioCapture(samples: [], sampleRate: 16_000, duration: 0) }
+        guard isRecording else {
+            // A stray stop while idle (ESC with nothing recording) must still
+            // leave a warm engine on a countdown — without this, the early
+            // return skips the re-arm below and the indicator stays lit forever.
+            if engine != nil { scheduleIdleRelease() }
+            return AudioCapture(samples: [], sampleRate: 16_000, duration: 0)
+        }
         isRecording = false
         lock.lock()
         recording = false
