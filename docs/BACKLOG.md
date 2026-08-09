@@ -1,7 +1,30 @@
 # VoiceFlow — Backlog & Handoff (resume point)
 
-Last updated: 2026-08-08 (late session). Read CLAUDE.md first (workflow ritual +
-product principles), then this, then docs/ROADMAP.md (phased plan to sellable).
+Last updated: 2026-08-10. Read CLAUDE.md first (workflow ritual + product
+principles), then this, then docs/ROADMAP.md (phased plan to sellable).
+
+## ✅ MERGED 2026-08-10 — mic idle-release (merge `ac5c0dc`)
+
+Full ritual: Yoni live PASS + both reviewer agents clean (6 minors hardened) +
+Codex PASS first try. Tags: `verified-2026-08-10-mic-idle` (current) ·
+`pre-mic-idle-merge-2026-08-10` (rollback). 178 tests. App rebuilt from main and
+installed. Both feature branches deleted; main is the only branch.
+
+## ⏱️ NEXT UP — latency instrumentation (the standing complaint)
+
+Yoni's verdict on the whole run: accuracy/trust good, "it's not that fast" —
+correct. Median release→insert is ~2.1s vs the 1.5s target, and time does NOT
+track utterance length, so a variable per-dictation cost (prime suspect: the
+second-engine arbiter runs) dominates. Phase 2 only measured END-TO-END.
+
+Next session, in order:
+1. New branch: per-stage timing (whisper decode / arbiter / cleanup / insert)
+   recorded per dictation into TranscriptRecord (additive SQLite migration, same
+   pattern as insertLatencySeconds). NOT the audio path — safe to build solo.
+2. Yoni dictates normally for a day; read the distribution from history.
+3. Attack the top cost with data (likely: tighten when voting/echo trigger the
+   arbiter — Codex ruling says tighten the TEXT heuristic, never doubt-gates).
+4. Offer the two-phase delivery live test (Settings toggle exists, off).
 
 ## 🔤 Vocabulary covers the RIGHT spellings, not the WRONG ones
 
