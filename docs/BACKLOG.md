@@ -27,6 +27,15 @@ Phases 1–5 built, reviewed, fixed, and INSTALLED. `feature/upgrades-phase1-5`.
 173 tests, 0 warnings (debug + release). App rebuilt from the branch and installed
 to `/Applications/VoiceFlow.app` (relaunched, running).
 
+**SETTLED (Codex ruling, round 6, adopted 2026-08-09): the prompt-echo defense is
+UNCONDITIONAL.** No confidence gate, no energy gate — prompt continuation can be
+confident, and audible audio does not prove the emitted terms came from speech.
+The accepted price: vocabulary-dense sentences ("Payload CMS and Next.js") can
+trigger an extra ~1–2s Apple arbiter run, and when the engines disagree the
+arbiter's text wins (lose a word, never insert one). If live use shows the cost
+is too high, tighten `looksLikePromptEcho`'s text heuristic or the corroboration
+policy — do NOT reach for doubt signals. Do not relitigate without Codex.
+
 **Codex round 3 (`511221d`) returned FAIL — the `>= 0.5` threshold passed PARTIAL
 echoes:** user says three of their terms, the decoder completes the glossary with
 the other two, the arbiter hears the three real ones → 3/5 = 0.6 cleared it and

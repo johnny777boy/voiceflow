@@ -14,6 +14,31 @@ macOS 26, SwiftPM, Command Line Tools only — there is no Xcode and no XCTest o
 this machine. The suite is a plain executable target; that is deliberate, not a
 gap to flag.
 
+## Round 7 — what changed since your round-6 FAIL
+
+You FAILed the tokenizer's symmetric trim:
+
+> `corroborationTokens` strips `.` from both ends, so ".NET" collapses into "net"
+> and an echoed ".NET" is corroborated by an arbiter that only said "NET".
+
+Fixed with an asymmetric trim: trailing edge punctuation is still stripped (a
+trailing dot in prose is overwhelmingly the sentence period), but a LEADING `.`
+followed by a letter or digit is kept as part of the word (".NET", ".env").
+Your two suggested cases are pinned as tests — `.NET` vs `NET` rejects,
+quoted/trailing `".NET."` vs `.net` corroborates — plus the sentence-boundary
+pair.
+
+**Your ruling on the open question is adopted and recorded**: no confidence or
+energy gate on `looksLikePromptEcho` — prompt continuation can be confident, and
+audible audio does not prove the emitted terms came from speech. The defense
+stays unconditional; the false-positive cost (an extra arbiter run on
+vocabulary-dense sentences, and the lose-a-word-not-insert-one preference when
+engines disagree) is accepted as the price of the invariant. If that cost proves
+too high in live use, the text heuristic or corroboration policy gets tightened —
+never gated on doubt signals. Recorded in the backlog as a settled decision.
+
+178 tests, 0 warnings.
+
 ## Round 6 — what changed since your round-5 FAIL
 
 You FAILed corroboration on tokenization:

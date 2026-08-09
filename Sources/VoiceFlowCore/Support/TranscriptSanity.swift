@@ -162,11 +162,31 @@ public enum TranscriptSanity {
     /// So: case-fold, strip only the punctuation that SURROUNDS a word (sentence
     /// periods, commas, quotes, brackets), and keep everything inside it. Two
     /// tokens corroborate only if they are the same token, symbols included.
+    ///
+    /// The trim is asymmetric on purpose. A leading `.` followed by a letter or
+    /// digit is part of the word (".NET", ".env") — blanket-trimming both ends
+    /// collapsed ".NET" into "net", so an echoed ".NET" was corroborated by an
+    /// arbiter that only said "NET" and the symbol was delivered. A TRAILING dot
+    /// is still stripped: in prose it is overwhelmingly the sentence period, and
+    /// keeping it would break corroboration of the identical spoken word at a
+    /// sentence boundary.
     static func corroborationTokens(_ text: String) -> [String] {
         let edges = CharacterSet(charactersIn: ".,;:!?\"'“”‘’()[]{}…«»")
+        let isEdge: (Character) -> Bool = { $0.unicodeScalars.allSatisfy(edges.contains) }
         return text
             .split(whereSeparator: { $0 == " " || $0.isNewline || $0 == "\t" })
-            .map { $0.lowercased().trimmingCharacters(in: edges) }
+            .map { raw -> String in
+                var token = Substring(raw).lowercased()[...]
+                while let last = token.last, isEdge(last) {
+                    token = token.dropLast()
+                }
+                while let first = token.first, isEdge(first) {
+                    if first == ".", let next = token.dropFirst().first,
+                       next.isLetter || next.isNumber { break }
+                    token = token.dropFirst()
+                }
+                return String(token)
+            }
             .filter { !$0.isEmpty }
     }
 

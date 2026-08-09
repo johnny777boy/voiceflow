@@ -89,6 +89,21 @@ func runContextBiasTests(_ suite: TestSuite) {
             "we shipped Next.js", by: "We shipped Next.js!"))
     }
 
+    suite.test("echo: a leading dot is part of a technical word") { s in
+        // Codex round-6 FAIL: trimming `.` from BOTH ends collapsed ".NET" into
+        // "net", so an echoed ".NET" was corroborated by an arbiter that only
+        // said "NET" and the leading symbol was delivered.
+        s.expectFalse(TranscriptSanity.isFullyCorroborated(
+            ".NET Sarah Kubernetes Grafana", by: "NET Sarah Kubernetes Grafana"))
+        // The identical term still corroborates through quotes, a trailing
+        // sentence period, and case differences — the trailing dot of ".NET." is
+        // a sentence period, the leading one is part of the word.
+        s.expect(TranscriptSanity.isFullyCorroborated(
+            "\".NET.\" Sarah", by: ".net Sarah"))
+        s.expect(TranscriptSanity.isFullyCorroborated(
+            "we moved to .NET.", by: "We moved to .NET"))
+    }
+
     suite.test("echo: one better-heard word does not license the rest of the glossary") { s in
         // Whisper spelling the name right does NOT corroborate the terms the
         // arbiter never heard. We lose "Sarah" in favour of "Sara" here, and that
