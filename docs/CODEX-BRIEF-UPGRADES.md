@@ -14,6 +14,45 @@ macOS 26, SwiftPM, Command Line Tools only — there is no Xcode and no XCTest o
 this machine. The suite is a plain executable target; that is deliberate, not a
 gap to flag.
 
+## Round 6 — what changed since your round-5 FAIL
+
+You FAILed corroboration on tokenization:
+
+> It reused `normalized`, which strips all punctuation, so "C++" and "C" collapse
+> to the same token — an echoed "C++" counted as corroborated by an arbiter that
+> only said "C", and the symbols were delivered.
+
+Correct. Corroboration now has its own tokenizer, `corroborationTokens`: case-fold,
+strip only the punctuation SURROUNDING a word (sentence periods, commas, quotes,
+brackets), keep everything inside it. "C++", "C#" and "Next.js" no longer
+corroborate "C" or "next". `normalized` is unchanged and still used for phantom
+phrase matching, where stripping is correct. Five tests, including the identical
+symbol-bearing pair that must still pass.
+
+177 tests, 0 warnings.
+
+### OPEN QUESTION for you — detection fires on this user's ordinary speech
+
+Not a defect I can prove, but a design problem your review should weigh in on.
+`looksLikePromptEcho` needs ≥4 words, ≥3 distinct prompt terms, ≥60% prompt words.
+This user's vocabulary is `Payload CMS, Next.js, PostgreSQL, TypeScript, GitHub,
+VS Code, Claude Code, Codex, …`. Worked example: **"Payload CMS and Next.js"**
+normalizes to 4 words, 3 of them prompt terms ⇒ 0.75 ⇒ **flagged as an echo**.
+That is a sentence he would genuinely say.
+
+Consequences when it misfires on real speech: an extra full Apple transcription
+(~1–2s, on a build whose measured median release-to-insert is already ~2.1s
+against a 1.5s target), and — if the engines differ at all — his text comes from
+the Apple engine instead of Whisper, which is the weaker engine on his accent.
+The feature meant to protect vocabulary-heavy dictation would degrade exactly it.
+
+The obvious tightening is to require a corroborating doubt signal, since echoes
+come from low-information audio: both `minAvgLogProb` and near-silence `maxRMS`
+are already computed at the call site. I have NOT applied it — it weakens a
+defense you have already FAILed me on four times, and that call should not be
+made unilaterally at this depth. Tell me whether you consider the confidence gate
+safe, or whether the latency/accuracy cost is the correct price.
+
 ## Round 5 — what changed since your round-4 FAIL
 
 You FAILed the exact-corroboration rule on the one thing it still approximated:

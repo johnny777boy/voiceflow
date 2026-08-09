@@ -139,8 +139,8 @@ public enum TranscriptSanity {
     /// the corroborating transcript, so a word appearing twice needs to have been
     /// heard twice.
     public static func isFullyCorroborated(_ text: String, by other: String) -> Bool {
-        let words = normalized(text).split(separator: " ").map(String.init)
-        let corroborating = normalized(other).split(separator: " ").map(String.init)
+        let words = corroborationTokens(text)
+        let corroborating = corroborationTokens(other)
         guard !words.isEmpty, !corroborating.isEmpty else { return false }
         var available: [String: Int] = [:]
         for word in corroborating { available[word, default: 0] += 1 }
@@ -149,6 +149,25 @@ public enum TranscriptSanity {
             available[word] = remaining - 1
         }
         return true
+    }
+
+    /// Tokenizer for corroboration — deliberately NOT `normalized`.
+    ///
+    /// `normalized` throws away every non-alphanumeric character, which is right
+    /// for matching stock phantom phrases and wrong here: it maps "C++" and "C"
+    /// onto the same token, so an echoed "C++" counted as corroborated by an
+    /// arbiter that only ever said "C", and the symbols were delivered. Same for
+    /// "Next.js" against "next", or "C#" against "C".
+    ///
+    /// So: case-fold, strip only the punctuation that SURROUNDS a word (sentence
+    /// periods, commas, quotes, brackets), and keep everything inside it. Two
+    /// tokens corroborate only if they are the same token, symbols included.
+    static func corroborationTokens(_ text: String) -> [String] {
+        let edges = CharacterSet(charactersIn: ".,;:!?\"'“”‘’()[]{}…«»")
+        return text
+            .split(whereSeparator: { $0 == " " || $0.isNewline || $0 == "\t" })
+            .map { $0.lowercased().trimmingCharacters(in: edges) }
+            .filter { !$0.isEmpty }
     }
 
     /// True when the ENTIRE transcript is a known phantom phrase AND at least one

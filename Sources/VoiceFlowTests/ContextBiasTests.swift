@@ -71,6 +71,24 @@ func runContextBiasTests(_ suite: TestSuite) {
             "Sarah Kubernetes Sarah", by: "Sarah Kubernetes Sarah again"))
     }
 
+    suite.test("echo: symbols inside a word are part of the word") { s in
+        // Codex round-5 FAIL: corroboration reused `normalized`, which strips all
+        // punctuation, so "C++" and "C" became the same token — an echoed "C++"
+        // counted as corroborated by an arbiter that only said "C", and the
+        // symbols were delivered.
+        s.expectFalse(TranscriptSanity.isFullyCorroborated(
+            "C++ Sarah Kubernetes Grafana", by: "C Sarah Kubernetes Grafana"))
+        s.expectFalse(TranscriptSanity.isFullyCorroborated(
+            "Next.js Sarah", by: "next Sarah"))
+        s.expectFalse(TranscriptSanity.isFullyCorroborated("C# Sarah", by: "C Sarah"))
+        // Identical symbol-bearing tokens still corroborate, and sentence
+        // punctuation around a word is not part of it.
+        s.expect(TranscriptSanity.isFullyCorroborated(
+            "C++, Sarah.", by: "c++ sarah"))
+        s.expect(TranscriptSanity.isFullyCorroborated(
+            "we shipped Next.js", by: "We shipped Next.js!"))
+    }
+
     suite.test("echo: one better-heard word does not license the rest of the glossary") { s in
         // Whisper spelling the name right does NOT corroborate the terms the
         // arbiter never heard. We lose "Sarah" in favour of "Sara" here, and that
