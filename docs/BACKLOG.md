@@ -21,7 +21,26 @@ Fix: add rows for the actual MISHEARINGS (`codices`→`Codex`, and whatever else
 reports). Phase 4 now proposes exactly these automatically after three hand
 corrections, since a capitalized target passes the name-shaped gate.
 
-## ✅ AUTONOMOUS RUN COMPLETE — Codex FAILed twice (both fixed), awaiting round 3
+## ✅ MERGED 2026-08-09 — Codex PASS on round 7 (`7c8235b`), Phases 1–5 on main
+
+Merge `ed0d2b5`; tags `verified-2026-08-09-upgrades` (current) ·
+`pre-upgrades-merge-2026-08-09` (rollback). 178 tests on the merge, pushed with
+tags. Seven Codex rounds total: six FAILs (all real, all in prompt-echo
+recovery), then PASS with probes confirming .NET/#Swift/+Type/.38/push-to-talk
+tokenization and the capture lifecycle.
+
+## 🎤 NOW IN LIVE TEST — mic idle-release (`feature/mic-idle-timeout`, installed)
+
+The installed app = main + the idle-release fix (branch pushed, 178 tests, 0
+warnings). Engine releases the mic 3 minutes after the last dictation → orange
+indicator goes DARK; hotkey press restarts it. Settings ▸ General toggle
+"Release the microphone when idle" (on). Yoni's live test: (1) wait ~3 idle
+minutes → light off; (2) first dictation after idle — press, wait a beat, speak —
+check the first word; (3) rapid back-to-back dictations — should feel exactly as
+before. After his verdict: reviewer agents + Codex brief for THIS small branch,
+then merge per ritual.
+
+## Previous run (kept for the record) — Codex FAILed twice, then twice more, then PASS
 
 Phases 1–5 built, reviewed, fixed, and INSTALLED. `feature/upgrades-phase1-5`.
 173 tests, 0 warnings (debug + release). App rebuilt from the branch and installed
