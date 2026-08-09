@@ -43,6 +43,12 @@ public struct AppSettings: Codable, Sendable, Equatable {
     /// upgrade it in place when the LLM polish lands. Needs live testing before
     /// it can be recommended — an in-place edit races the user's own typing.
     public var twoPhaseDeliveryEnabled: Bool
+    /// Release the microphone after a few minutes without dictating, so the
+    /// macOS mic indicator goes dark when the app is idle. The engine restarts
+    /// on the next key-press; only the FIRST dictation after a long idle loses
+    /// the pre-press pre-roll (the warm engine and pre-roll return immediately
+    /// after it). Off = the original always-warm behavior.
+    public var micIdleReleaseEnabled: Bool
 
     public init(
         microphoneDeviceID: String? = nil,
@@ -61,7 +67,8 @@ public struct AppSettings: Codable, Sendable, Equatable {
         spokenPunctuationEnabled: Bool = false,
         screenContextEnabled: Bool = true,
         fastShortUtterances: Bool = true,
-        twoPhaseDeliveryEnabled: Bool = false
+        twoPhaseDeliveryEnabled: Bool = false,
+        micIdleReleaseEnabled: Bool = true
     ) {
         self.microphoneDeviceID = microphoneDeviceID
         self.hotkey = hotkey
@@ -80,6 +87,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
         self.screenContextEnabled = screenContextEnabled
         self.fastShortUtterances = fastShortUtterances
         self.twoPhaseDeliveryEnabled = twoPhaseDeliveryEnabled
+        self.micIdleReleaseEnabled = micIdleReleaseEnabled
     }
 
     /// Backward-compatible decoding: settings.json written by older builds lacks
@@ -105,6 +113,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
         screenContextEnabled = try c.decodeIfPresent(Bool.self, forKey: .screenContextEnabled) ?? d.screenContextEnabled
         fastShortUtterances = try c.decodeIfPresent(Bool.self, forKey: .fastShortUtterances) ?? d.fastShortUtterances
         twoPhaseDeliveryEnabled = try c.decodeIfPresent(Bool.self, forKey: .twoPhaseDeliveryEnabled) ?? d.twoPhaseDeliveryEnabled
+        micIdleReleaseEnabled = try c.decodeIfPresent(Bool.self, forKey: .micIdleReleaseEnabled) ?? d.micIdleReleaseEnabled
     }
 
     public static let `default` = AppSettings()

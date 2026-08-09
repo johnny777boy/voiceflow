@@ -102,6 +102,9 @@ final class AppCoordinator: ObservableObject {
             Log.transcription.notice("engine: legacy SFSpeechRecognizer")
         }
         engine.preferredLanguage = loaded.languageCode
+        if #available(macOS 26.0, *), let sa = engine as? SpeechAnalyzerDictation {
+            sa.idleReleaseEnabled = loaded.micIdleReleaseEnabled
+        }
         let live = engine
         self.live = live
         // Transcriber: the fast Apple engine is ALWAYS the fallback. When the user
@@ -413,6 +416,9 @@ final class AppCoordinator: ObservableObject {
         try? settingsStore.save(new)
         live.preferredLanguage = new.languageCode
         live.contextualStrings = contextualStrings(from: new)
+        if #available(macOS 26.0, *), let sa = live as? SpeechAnalyzerDictation {
+            sa.idleReleaseEnabled = new.micIdleReleaseEnabled
+        }
         Task { await controller.updateSettings(new) }
         if hotkeyChanged { registerHotkey() }
         if loginChanged { LoginItemManager.setEnabled(new.launchAtLogin) }
