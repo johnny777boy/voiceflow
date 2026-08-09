@@ -21,6 +21,17 @@ Phases 1–5 built, reviewed, fixed, and INSTALLED. `feature/upgrades-phase1-5`.
 173 tests, 0 warnings (debug + release). App rebuilt from the branch and installed
 to `/Applications/VoiceFlow.app` (relaunched, running).
 
+**Codex round 3 (`511221d`) returned FAIL — the `>= 0.5` threshold passed PARTIAL
+echoes:** user says three of their terms, the decoder completes the glossary with
+the other two, the arbiter hears the three real ones → 3/5 = 0.6 cleared it and
+"Payload CMS" was inserted. **Fixed by deleting the scoring entirely:** Whisper's
+text now stands only if EVERY word in it appears in the arbiter's transcript
+(`TranscriptSanity.isFullyCorroborated`), else the arbiter's transcript wins. No
+threshold left to tune. **Lesson worth keeping:** three consecutive FAILs were all
+similarity scores, and partial agreement is exactly the shape of a partial echo —
+when the requirement is absolute ("never deliver an uncorroborated word"), encode
+it exactly instead of approximating it.
+
 **Codex round 2 (`c48db01`) returned FAIL — confirmed the capture fix, then found
 the agreement check I added to make echo false-positives harmless was itself
 broken:** `wordOverlap` divided by the SHORTER transcript, so a subset scored a

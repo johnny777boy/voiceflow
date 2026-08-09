@@ -14,6 +14,34 @@ macOS 26, SwiftPM, Command Line Tools only — there is no Xcode and no XCTest o
 this machine. The suite is a plain executable target; that is deliberate, not a
 gap to flag.
 
+## Round 4 — what changed since your round-3 FAIL
+
+You confirmed the capture-ownership fix and found no other lifecycle path, then
+FAILed the `>= 0.5` agreement threshold:
+
+> User says "Sarah Kubernetes Grafana"; Whisper echoes "Sarah Kubernetes Payload
+> CMS Grafana"; the arbiter hears the three real words. 3/5 = 0.6 clears the
+> threshold and "Payload CMS" is inserted — words neither the user nor the arbiter
+> produced.
+
+Correct, and it is the third hole in a row in this one decision. The pattern is
+the point: every version was a similarity SCORE, and partial agreement is exactly
+the shape of a partial echo, so no threshold can separate them. Rather than raise
+it to 0.8 I replaced the scoring with the exact property the code actually needs:
+
+**`TranscriptSanity.isFullyCorroborated(text, by: other)`** — Whisper's text is
+delivered only if EVERY word in it also appears in the arbiter's transcript.
+Otherwise the arbiter's transcript is delivered. There is no threshold left to
+tune, and no partial case to construct: one uncorroborated word is enough to
+reject. `wordOverlap` is deleted (zero references remain).
+
+Accepted cost, unchanged in principle but now more often paid: when the engines
+differ on any word we take the arbiter's transcript, which can lose a better
+spelling Whisper had (its "Sarah" against the arbiter's "Sara"). Losing a word
+beats inserting one. A test pins that specific trade so nobody "fixes" it later.
+
+175 tests, 0 warnings.
+
 ## Round 3 — what changed since your round-2 FAIL
 
 You confirmed the capture-ownership fix, then returned **FAIL** on the agreement

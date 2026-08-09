@@ -232,16 +232,16 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
             case .heard(let second):
                 try? FileManager.default.removeItem(at: url)
                 // The other engine had no prompt to echo, so it is the tiebreak.
-                // If the two transcripts largely AGREE, the user really did say a
-                // run of their own vocabulary and the echo test was a false alarm
-                // — keep Whisper's text, which is the better engine on this
-                // user's accent. Only genuine echo (text the other engine never
-                // produced) is replaced, and only ever by a real transcript.
-                let agreement = TranscriptSanity.wordOverlap(text, second)
-                if agreement >= 0.5 {
-                    Log.transcription.notice("Echo suspicion cleared — both engines heard the same words")
-                    return VoiceFlowCore.TranscriptionResult(
-                        text: vote(primary: text, secondary: second, context: context))
+                // Whisper's text stands ONLY if every word in it was independently
+                // produced by that engine too — then nothing came from the
+                // glossary and the echo test was a false alarm on a genuinely
+                // vocabulary-dense sentence. Anything less is a partial echo: the
+                // user says three of their terms and the decoder completes the
+                // list, which is how "Payload CMS" gets inserted into a sentence
+                // that never contained it.
+                if TranscriptSanity.isFullyCorroborated(text, by: second) {
+                    Log.transcription.notice("Echo suspicion cleared — every word was corroborated by the second engine")
+                    return VoiceFlowCore.TranscriptionResult(text: text)
                 }
                 Log.transcription.notice("Arbiter transcript used in place of the echoed decode")
                 return VoiceFlowCore.TranscriptionResult(text: second)

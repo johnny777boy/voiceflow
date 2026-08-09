@@ -112,32 +112,31 @@ public enum TranscriptSanity {
         return Double(matches.count) / Double(words.count) >= 0.6
     }
 
-    /// How much two transcripts of the same audio actually agree, as a fraction
-    /// of the LARGER one's distinct words (0…1).
+    /// Whether EVERY word in `text` also appears in `other`.
     ///
-    /// Used to tell a real utterance apart from a prompt echo after the fact: two
-    /// engines listening to the same speech land on largely the same words, while
-    /// an echo is text the other engine never produced, because it was never
-    /// spoken. This is what keeps a genuinely vocabulary-dense sentence — "Sarah,
-    /// Kubernetes, Payload CMS" — from being thrown away for looking like a
-    /// glossary.
+    /// Used to decide whether a transcript suspected of being a prompt echo can be
+    /// delivered as-is, given a second engine's transcript of the same audio that
+    /// had no prompt to echo. If every word we would deliver was independently
+    /// produced by that engine, none of them came from the glossary, and the text
+    /// is safe. If even one word is uncorroborated, it is not.
     ///
-    /// Dividing by the LARGER count is the whole correctness of this function.
-    /// Against the shorter one, a subset scores a perfect 1.0: the user says
-    /// "Sarah", Whisper echoes "Sarah Kubernetes Payload CMS Grafana", the other
-    /// engine correctly hears "Sarah" — and the echo would be declared agreed-upon
-    /// and delivered in full. Both transcripts must be substantially covered, so
-    /// text that only ONE engine produced always counts against agreement.
+    /// This is deliberately an EXACT property rather than a similarity score.
+    /// Three separate scoring thresholds were tried here and all three shipped a
+    /// hole, because "mostly agrees" is not the question — a transcript that
+    /// agrees on four words out of five still inserts the fifth, and the fifth is
+    /// exactly the word the user never said. Partial agreement is precisely the
+    /// shape of a partial echo: the user says three of their vocabulary terms, the
+    /// decoder completes the glossary with the other two.
     ///
-    /// When the two genuinely disagree the caller prefers the engine with no
-    /// prompt to echo, even though that can mean dropping a word the other engine
-    /// heard. That asymmetry is deliberate: inserting words the user never said is
-    /// the failure this codebase treats as unacceptable, and losing one is not.
-    public static func wordOverlap(_ lhs: String, _ rhs: String) -> Double {
-        let a = Set(normalized(lhs).split(separator: " ").map(String.init))
-        let b = Set(normalized(rhs).split(separator: " ").map(String.init))
-        guard !a.isEmpty, !b.isEmpty else { return 0 }
-        return Double(a.intersection(b).count) / Double(max(a.count, b.count))
+    /// The cost is real and accepted: when the engines differ on any word the
+    /// caller falls back to the other engine's transcript, which can mean losing a
+    /// better spelling this one had. Inserting words the user never said is the
+    /// failure this codebase treats as unacceptable; losing one is not.
+    public static func isFullyCorroborated(_ text: String, by other: String) -> Bool {
+        let words = Set(normalized(text).split(separator: " ").map(String.init))
+        let corroborating = Set(normalized(other).split(separator: " ").map(String.init))
+        guard !words.isEmpty, !corroborating.isEmpty else { return false }
+        return words.isSubset(of: corroborating)
     }
 
     /// True when the ENTIRE transcript is a known phantom phrase AND at least one

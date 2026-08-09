@@ -31,33 +31,40 @@ func runContextBiasTests(_ suite: TestSuite) {
             text: "Compose Drafts Archive Meeting", promptTerms: []))
     }
 
-    suite.test("echo: two engines that heard the same words are not an echo") { s in
-        // The Codex FAIL scenario: a genuine, vocabulary-dense utterance trips the
-        // echo test on text alone. What settles it is the second engine — it had
-        // no prompt to echo, so agreement means the user really said this.
-        s.expect(TranscriptSanity.wordOverlap(
-            "Sarah Kubernetes Payload CMS Grafana",
-            "Sara Kubernetes Payload CMS Grafana") >= 0.5)
-        // A real echo is text the other engine never produced.
-        s.expect(TranscriptSanity.wordOverlap(
-            "Compose, Drafts, Snoozed, Archive, Meeting.",
-            "can you send that over") < 0.5)
-        s.expectEqual(TranscriptSanity.wordOverlap("", "anything"), 0)
+    suite.test("echo: a suspected transcript stands only when EVERY word is corroborated") { s in
+        // The genuine case this exists to protect: a vocabulary-dense sentence
+        // both engines independently produced. Punctuation and case don't count.
+        s.expect(TranscriptSanity.isFullyCorroborated(
+            "Sarah, Kubernetes, Payload CMS.", by: "sarah kubernetes payload cms"))
+        // A shorter arbiter transcript still corroborates a subset of itself.
+        s.expect(TranscriptSanity.isFullyCorroborated(
+            "Sarah Kubernetes", by: "Sarah Kubernetes Grafana"))
     }
 
-    suite.test("echo: an echo that swallows the one word actually said is not agreement") { s in
-        // Codex round-2 FAIL: measuring against the SHORTER transcript made a
-        // subset score a perfect 1.0. The user says "Sarah"; Whisper echoes the
-        // whole glossary; the other engine correctly hears only "Sarah". Scoring
-        // that as agreement delivered the entire echo — words never spoken.
-        s.expect(TranscriptSanity.wordOverlap(
-            "Sarah Kubernetes Payload CMS Grafana", "Sarah") < 0.5)
-        // ...and it must not matter which way round the arguments come.
-        s.expect(TranscriptSanity.wordOverlap(
-            "Sarah", "Sarah Kubernetes Payload CMS Grafana") < 0.5)
-        // A near-identical pair still agrees.
-        s.expect(TranscriptSanity.wordOverlap(
-            "send it to Sarah today", "send it to Sara today") >= 0.5)
+    suite.test("echo: partial agreement is a partial echo, not agreement") { s in
+        // Codex round-3 FAIL. The user says three of their terms; the decoder
+        // completes the glossary with the other two; the arbiter hears the three
+        // real ones. Every similarity SCORE tried here cleared this (3/5 = 0.6),
+        // and delivered "Payload CMS" — words neither the user nor the arbiter
+        // produced. Only exact corroboration catches it.
+        s.expectFalse(TranscriptSanity.isFullyCorroborated(
+            "Sarah Kubernetes Payload CMS Grafana", by: "Sarah Kubernetes Grafana"))
+        // Codex round-2 FAIL: a subset must not read as full agreement.
+        s.expectFalse(TranscriptSanity.isFullyCorroborated(
+            "Sarah Kubernetes Payload CMS Grafana", by: "Sarah"))
+        // Outright disagreement, and the empty cases.
+        s.expectFalse(TranscriptSanity.isFullyCorroborated(
+            "Compose, Drafts, Snoozed, Archive.", by: "can you send that over"))
+        s.expectFalse(TranscriptSanity.isFullyCorroborated("", by: "anything"))
+        s.expectFalse(TranscriptSanity.isFullyCorroborated("anything", by: ""))
+    }
+
+    suite.test("echo: one better-heard word does not license the rest of the glossary") { s in
+        // Whisper spelling the name right does NOT corroborate the terms the
+        // arbiter never heard. We lose "Sarah" in favour of "Sara" here, and that
+        // trade — lose a word rather than insert one — is the point.
+        s.expectFalse(TranscriptSanity.isFullyCorroborated(
+            "Sarah Kubernetes Payload CMS", by: "Sara Kubernetes"))
     }
 
     // MARK: - TranscriptionContext
