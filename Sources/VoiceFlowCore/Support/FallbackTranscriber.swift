@@ -44,11 +44,12 @@ public final class FallbackTranscriber: Transcribing, @unchecked Sendable {
             } catch is CancellationError {
                 throw CancellationError()   // a cancelled dictation must stay cancelled
             } catch {
-                // On most failures the preferred engine leaves the capture intact
-                // (Whisper deletes the file only on success) so the fallback can
-                // re-read it. Exception: the phantom-arbiter path may have already
-                // consumed the file — the fallback then cleanly reports an empty
-                // transcript, which is the intended outcome for vetoed silence.
+                // On failure the preferred engine leaves the capture intact
+                // (Whisper deletes the file only on success, and its second-opinion
+                // arbiter works on a private copy), so the fallback can always
+                // re-read the original. That invariant is load-bearing: without it
+                // a failed second opinion takes the only recording with it and the
+                // user's speech disappears with no error.
                 onFallback?(String(describing: error))
             }
         }

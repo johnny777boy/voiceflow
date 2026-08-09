@@ -3,11 +3,23 @@
 Last updated: 2026-08-08 (late session). Read CLAUDE.md first (workflow ritual +
 product principles), then this, then docs/ROADMAP.md (phased plan to sellable).
 
-## ✅ AUTONOMOUS RUN COMPLETE (2026-08-08 night) — awaiting Yoni's Codex PASS
+## ✅ AUTONOMOUS RUN COMPLETE — Codex round 1 FAIL fixed, awaiting re-verification
 
-Phases 1–5 are built, reviewed, fixed, and INSTALLED. `feature/upgrades-phase1-5`
-head `539465b`. 172 tests, 0 warnings (debug + release). App built from the branch
-and installed to `/Applications/VoiceFlow.app` (relaunched, running).
+Phases 1–5 built, reviewed, fixed, and INSTALLED. `feature/upgrades-phase1-5`.
+173 tests, 0 warnings (debug + release). App rebuilt from the branch and installed
+to `/Applications/VoiceFlow.app` (relaunched, running).
+
+**Codex round 1 (`fab60de`) returned FAIL — one blocking defect, correctly found:**
+prompt-echo recovery could lose real speech. The Apple arbiter took the recorder's
+shared capture URL and deleted it in a `defer` that runs even when it throws
+afterwards (failed model install), so an `.unavailable` verdict left the fallback
+engine nothing to read. The echo path I added throws on `.unavailable` (unlike the
+pre-existing phantom path, which falls through), so the echo fix introduced it.
+**Fixed:** the arbiter now works on a private COPY of the `.caf`, and
+`SpeechAnalyzerDictation` consumes the capture it was handed rather than the
+recorder's shared slot. Codex's second point (vocabulary-dense speech tripping the
+echo test) is handled by comparing the two transcripts — agreement ≥ 0.5 keeps
+Whisper's text — rather than by weakening detection.
 
 **Yoni's next actions, in order:**
 1. **Live-test the installed build** — it is the branch, not main. Rollback if

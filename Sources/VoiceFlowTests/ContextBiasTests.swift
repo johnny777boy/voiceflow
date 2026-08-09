@@ -31,6 +31,20 @@ func runContextBiasTests(_ suite: TestSuite) {
             text: "Compose Drafts Archive Meeting", promptTerms: []))
     }
 
+    suite.test("echo: two engines that heard the same words are not an echo") { s in
+        // The Codex FAIL scenario: a genuine, vocabulary-dense utterance trips the
+        // echo test on text alone. What settles it is the second engine — it had
+        // no prompt to echo, so agreement means the user really said this.
+        s.expect(TranscriptSanity.wordOverlap(
+            "Sarah Kubernetes Payload CMS Grafana",
+            "Sara Kubernetes Payload CMS Grafana") >= 0.5)
+        // A real echo is text the other engine never produced.
+        s.expect(TranscriptSanity.wordOverlap(
+            "Compose, Drafts, Snoozed, Archive, Meeting.",
+            "can you send that over") < 0.5)
+        s.expectEqual(TranscriptSanity.wordOverlap("", "anything"), 0)
+    }
+
     // MARK: - TranscriptionContext
 
     suite.test("context: vocabulary comes before screen terms and dedupes case-insensitively") { s in

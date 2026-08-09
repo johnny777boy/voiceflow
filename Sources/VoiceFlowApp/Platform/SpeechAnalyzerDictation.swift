@@ -208,7 +208,15 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
     private func transcribe(
         _ audio: AudioCapture, languageCode: String, extraTerms: [String]
     ) async throws -> TranscriptionResult {
-        guard let url = takeFileURL() else { throw VoiceFlowError.emptyTranscript }
+        // Transcribe the capture we were HANDED, not the recorder's shared slot.
+        //
+        // Ownership matters here: as a second-opinion arbiter this engine is given
+        // a private copy, and consuming the recorder's shared URL instead would
+        // destroy the only capture — including on the paths where this method
+        // throws AFTER taking it (a failed model install, below). The caller that
+        // owns the original would then have nothing left to fall back to, and real
+        // speech would be silently swallowed.
+        guard let url = audio.fileURL ?? takeFileURL() else { throw VoiceFlowError.emptyTranscript }
         defer { try? FileManager.default.removeItem(at: url) }
 
         // Resolve to a locale the recognizer actually supports (region-aware), from

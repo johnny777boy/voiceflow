@@ -5,11 +5,58 @@ Branch to verify: `feature/upgrades-phase1-5` (head `539465b` — verify whateve
 Merge target: `main` (`7b8f8fd`)
 Diff: `git diff 7b8f8fd...HEAD -- Sources/`
 Build/test: `swift build` and `swift build -c release` (both 0 warnings) ·
-`swift run VoiceFlowTests` → "All 172 tests passed".
+`swift run VoiceFlowTests` → "All 173 tests passed".
+If your environment fails these with `sandbox-exec: sandbox_apply: Operation not
+permitted`, re-run with `--disable-sandbox` (that is an environment restriction,
+not a project defect — the SwiftPM cache warnings it prints are expected too).
 
 macOS 26, SwiftPM, Command Line Tools only — there is no Xcode and no XCTest on
 this machine. The suite is a plain executable target; that is deliberate, not a
 gap to flag.
+
+## Round 2 — what changed since your FAIL
+
+You returned **FAIL** on round 1 (`fab60de`) with one blocking defect, and you
+were right:
+
+> `WhisperKitTranscriber.swift:229` — prompt-echo recovery can lose real speech
+> when the Apple arbiter consumes the only capture file and then becomes
+> unavailable.
+
+Confirmed exactly as described: `SpeechAnalyzerDictation.transcribe` took the
+recorder's shared `fileURL` and deleted it in a `defer` that runs even when the
+method throws later (a failed model install), so `.unavailable` left the fallback
+with nothing to read. The echo path I added throws on `.unavailable` — unlike the
+pre-existing phantom path, which falls through — so the defect was introduced by
+the echo fix itself.
+
+**Fix (your first suggestion, capture ownership made explicit):**
+- `consultArbiter` now copies the `.caf` to a private temp file and hands the
+  arbiter the copy. The arbiter deletes only that copy; the original survives
+  every arbiter outcome, and the caller decides when to consume it.
+- `SpeechAnalyzerDictation.transcribe` now consumes `audio.fileURL` (the capture
+  it was handed) rather than the recorder's shared slot, falling back to
+  `takeFileURL()` only when it was given nothing.
+- The `FallbackTranscriber` comment that documented the old "the arbiter may have
+  already consumed the file" behavior was wrong and is corrected.
+
+**Your second point (tightening echo detection so vocabulary-dense speech does
+not enter this path as readily)** is addressed differently — by making a false
+positive harmless rather than rarer, since the text-only signal cannot separate
+"Sarah Kubernetes Payload CMS Grafana" from an echo of those same terms. On
+`.heard`, the two transcripts are compared (`TranscriptSanity.wordOverlap`): the
+second engine had no prompt to echo, so agreement ≥ 0.5 means the user really
+said it and **Whisper's text is kept** (it is the better engine on this user's
+accent); only genuine disagreement substitutes the arbiter's transcript. Please
+attack this specifically.
+
+Head is now `HEAD` of the branch; 173 tests, 0 warnings.
+
+**Note on testing this area:** the test target links `VoiceFlowCore` only, so
+`WhisperKitTranscriber` / `SpeechAnalyzerDictation` (both in the app target) have
+no unit coverage — the capture-ownership invariant is enforced by code and review,
+not by a test. That is a pre-existing structural limitation of this package
+layout, not something introduced here. Flag it if you think it is blocking.
 
 ## Context
 
@@ -81,10 +128,13 @@ you return a verdict.
 
 ## Attack specifically
 
-- **Capture-file lifecycle** across three consumers (Whisper, the phantom
-  arbiter, the voting arbiter, the Apple fallback): double-delete, leak, or a
-  path reading a file another already deleted. The arbiter must be consulted at most
-  once per dictation.
+- **Capture-file lifecycle** across every consumer (Whisper, the phantom arbiter,
+  the echo arbiter, the voting arbiter, the Apple fallback): double-delete, leak,
+  or a path reading a file another already deleted. The invariant to break: **the
+  original capture survives until Whisper succeeds, and the fallback can always
+  re-read it.** The arbiter must be consulted at most once per dictation.
+- **The round-1 defect's neighbours**: any other place where a failure path
+  destroys state a later recovery depends on.
 - **Rapid push-to-talk** (5 taps in 2s): a stale refinement or correction watcher
   from dictation N touching dictation N+1's field.
 - **Cancellation** mid-transcribe, mid-cleanup, mid-arbiter: continuations

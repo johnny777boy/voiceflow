@@ -112,6 +112,22 @@ public enum TranscriptSanity {
         return Double(matches.count) / Double(words.count) >= 0.6
     }
 
+    /// How much two transcripts of the same audio actually agree, as a fraction
+    /// of the shorter one's distinct words (0…1).
+    ///
+    /// Used to tell a real utterance apart from a prompt echo after the fact: two
+    /// engines listening to the same speech land on largely the same words, while
+    /// an echo is text the other engine never produced, because it was never
+    /// spoken. This is what keeps a genuinely vocabulary-dense sentence — "Sarah,
+    /// Kubernetes, Payload CMS" — from being thrown away for looking like a
+    /// glossary.
+    public static func wordOverlap(_ lhs: String, _ rhs: String) -> Double {
+        let a = Set(normalized(lhs).split(separator: " ").map(String.init))
+        let b = Set(normalized(rhs).split(separator: " ").map(String.init))
+        guard !a.isEmpty, !b.isEmpty else { return 0 }
+        return Double(a.intersection(b).count) / Double(min(a.count, b.count))
+    }
+
     /// True when the ENTIRE transcript is a known phantom phrase AND at least one
     /// doubt signal corroborates (decoder avg log-prob below -1.0, or the clip
     /// was near-silent). Both-nil signals ⇒ always false (fail-open).

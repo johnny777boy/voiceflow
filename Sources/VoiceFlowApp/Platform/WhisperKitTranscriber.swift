@@ -230,11 +230,20 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
             Log.transcription.error("Whisper echoed the context prompt — discarding the decode")
             switch try await consultArbiter(audio, languageCode: languageCode, context: context) {
             case .heard(let second):
-                // The other engine transcribed the same audio without a prompt to
-                // echo, so its text is the trustworthy one. Still a real engine's
-                // output — nothing is invented here.
-                Log.transcription.notice("Arbiter transcript used in place of the echoed decode")
                 try? FileManager.default.removeItem(at: url)
+                // The other engine had no prompt to echo, so it is the tiebreak.
+                // If the two transcripts largely AGREE, the user really did say a
+                // run of their own vocabulary and the echo test was a false alarm
+                // — keep Whisper's text, which is the better engine on this
+                // user's accent. Only genuine echo (text the other engine never
+                // produced) is replaced, and only ever by a real transcript.
+                let agreement = TranscriptSanity.wordOverlap(text, second)
+                if agreement >= 0.5 {
+                    Log.transcription.notice("Echo suspicion cleared — both engines heard the same words")
+                    return VoiceFlowCore.TranscriptionResult(
+                        text: vote(primary: text, secondary: second, context: context))
+                }
+                Log.transcription.notice("Arbiter transcript used in place of the echoed decode")
                 return VoiceFlowCore.TranscriptionResult(text: second)
             case .silence, .unavailable:
                 // Silence ⇒ there was nothing to hear anyway. Unavailable ⇒ we
@@ -256,9 +265,8 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
                     Log.transcription.notice("Arbiter heard speech — delivering Whisper text")
                     // The second opinion is already paid for; let it fix a name.
                     let merged = vote(primary: text, secondary: second, context: context)
-                    // The arbiter consumed the capture through its own path; this
-                    // keeps deletion symmetric with the near-miss branch below so
-                    // no future arbiter can leak the file.
+                    // We still own the original capture (the arbiter only ever saw
+                    // a copy), and this is the success path, so consume it here.
                     try? FileManager.default.removeItem(at: url)
                     return VoiceFlowCore.TranscriptionResult(text: merged)
                 case .silence:
@@ -323,15 +331,36 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         case unavailable
     }
 
-    /// Run the Apple engine over the same capture. Consumes (and deletes) the
-    /// capture file through that engine's own path, so it must be called at most
-    /// once per dictation.
+    /// Run the Apple engine over a PRIVATE COPY of the same capture.
+    ///
+    /// The copy is the whole point. The Apple engine takes ownership of whatever
+    /// capture it is given and deletes it — including when it throws afterwards
+    /// (a failed model install). Handing it the original meant a second opinion
+    /// that failed took the only recording with it, leaving the fallback engine
+    /// nothing to read and swallowing real speech. The original now survives
+    /// every arbiter outcome, and this method's caller decides when to delete it.
     private func consultArbiter(
         _ audio: AudioCapture, languageCode: String, context: VoiceFlowCore.TranscriptionContext
     ) async throws -> ArbiterVerdict {
         guard let arbiter = silenceArbiter else { return .unavailable }
+        guard let source = audio.fileURL else { return .unavailable }
+        let copyURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("voiceflow-arbiter-\(UUID().uuidString).caf")
         do {
-            let result = try await arbiter.transcribe(audio, languageCode: languageCode, context: context)
+            try FileManager.default.copyItem(at: source, to: copyURL)
+        } catch {
+            Log.transcription.error("Could not copy capture for the arbiter (\(String(describing: error), privacy: .public))")
+            return .unavailable
+        }
+        // Belt and braces: the arbiter deletes the copy itself, but a throw before
+        // it gets that far must not leave a stray file behind.
+        defer { try? FileManager.default.removeItem(at: copyURL) }
+        let capture = AudioCapture(
+            samples: audio.samples, sampleRate: audio.sampleRate,
+            duration: audio.duration, fileURL: copyURL
+        )
+        do {
+            let result = try await arbiter.transcribe(capture, languageCode: languageCode, context: context)
             let trimmed = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty ? .silence : .heard(trimmed)
         } catch VoiceFlowError.emptyTranscript {
