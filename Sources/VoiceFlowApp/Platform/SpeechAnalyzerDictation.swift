@@ -18,8 +18,75 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
     var levelHandler: (@Sendable (Float) -> Void)?
     var contextualStrings: [String] = []
 
-    private var engine: AVAudioEngine?           // long-lived, kept warm
+    private var engine: AVAudioEngine?           // long-lived, kept warm while in use
     private let lock = NSLock()
+
+    // MARK: Idle release (the always-on mic indicator fix)
+    //
+    // The warm engine exists so the pre-roll ring already holds the audio from
+    // just BEFORE the keypress — that is what stops the first word clipping. The
+    // cost is the macOS orange mic indicator glowing all day. The compromise:
+    // stay warm during an active session, release the mic after a few idle
+    // minutes. Only the first dictation after an idle gap starts cold (no
+    // pre-press pre-roll; the engine starts at key-down instead), which is the
+    // tradeoff the user accepted and live-tests.
+
+    /// Whether the idle timer may release the engine. Set from AppSettings.
+    /// Turning it off cancels any pending release (the engine stays warm, the
+    /// original behavior); turning it on while already idle arms the countdown
+    /// immediately, so the toggle takes effect without waiting for a dictation.
+    var idleReleaseEnabled = true {
+        didSet {
+            onMainAsync {
+                if self.idleReleaseEnabled {
+                    if self.engine != nil, !self.isRecording { self.scheduleIdleRelease() }
+                } else {
+                    self.cancelIdleTimer()
+                }
+            }
+        }
+    }
+    /// How long without a dictation before the mic is released.
+    var idleReleaseInterval: TimeInterval = 180
+    private var idleTimer: Timer?
+
+    private func onMainAsync(_ body: @escaping @Sendable () -> Void) {
+        if Thread.isMainThread { body() } else { DispatchQueue.main.async(execute: body) }
+    }
+
+    /// (Re)arm the idle countdown. Main thread only — called from the same
+    /// main-thread paths that start/stop recording, so there is no racing writer.
+    private func scheduleIdleRelease() {
+        cancelIdleTimer()
+        guard idleReleaseEnabled else { return }
+        let timer = Timer(timeInterval: idleReleaseInterval, repeats: false) { [weak self] _ in
+            self?.releaseEngineIfIdle()
+        }
+        timer.tolerance = 10   // seconds; the exact minute does not matter
+        RunLoop.main.add(timer, forMode: .common)
+        idleTimer = timer
+    }
+
+    private func cancelIdleTimer() {
+        idleTimer?.invalidate()
+        idleTimer = nil
+    }
+
+    /// Stop the engine and release the microphone. Main thread. A dictation in
+    /// progress is never interrupted: the timer only ever fires `idleReleaseInterval`
+    /// after the last stop, and every start cancels it first — but the guard stays,
+    /// belt and braces, because tearing the engine down mid-capture would sever the
+    /// tap that is writing the user's audio.
+    private func releaseEngineIfIdle() {
+        guard !isRecording, let engine else { return }
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        self.engine = nil
+        lock.lock()
+        preroll.removeAll(keepingCapacity: false)
+        lock.unlock()
+        Log.transcription.notice("SA engine released after idle — mic indicator off; next dictation restarts it at key-down")
+    }
     private var audioFile: AVAudioFile?
     private var fileURL: URL?
     private var tapFormat: AVAudioFormat?
@@ -54,7 +121,13 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
     /// fills a short pre-roll ring buffer. Idempotent. Call at app launch so the mic
     /// is already listening when the user presses the key — this is what stops the
     /// first word ("So how come…") from being clipped by mic warm-up.
-    func prewarm() { try? onMain { try self.startEngineIfNeeded() } }
+    func prewarm() {
+        try? onMain {
+            try self.startEngineIfNeeded()
+            // A prewarmed engine that never gets used must still go dark.
+            self.scheduleIdleRelease()
+        }
+    }
 
     private func startEngineIfNeeded() throws {
         if engine != nil { return }
@@ -108,7 +181,8 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
     func startRecording() throws { try onMain { try self.startRecordingImpl() } }
 
     private func startRecordingImpl() throws {
-        try startEngineIfNeeded()   // warm already, unless this is the very first use
+        cancelIdleTimer()           // a dictation is the definition of "not idle"
+        try startEngineIfNeeded()   // warm already, unless idle-released or first use
         guard let fmt = tapFormat else {
             throw VoiceFlowError.audioEngineFailure("Audio not ready.")
         }
@@ -172,6 +246,9 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
         lock.unlock()
         _ = file
         levelHandler?(0)
+        // The engine stays warm from here so back-to-back dictations keep their
+        // pre-roll; the countdown to releasing the mic starts now.
+        scheduleIdleRelease()
         // Expose the recorded file so a file-based transcriber (WhisperKit) can read
         // it; SpeechAnalyzer's own transcribe() still uses the internal fileURL.
         return AudioCapture(samples: [], sampleRate: 16_000, duration: 0, fileURL: fileURL)
