@@ -14,6 +14,23 @@ macOS 26, SwiftPM, Command Line Tools only — there is no Xcode and no XCTest o
 this machine. The suite is a plain executable target; that is deliberate, not a
 gap to flag.
 
+## Round 5 — what changed since your round-4 FAIL
+
+You FAILed the exact-corroboration rule on the one thing it still approximated:
+
+> `isFullyCorroborated` used `Set`, so it corroborated word TYPES, not
+> occurrences. Whisper produces "Sarah Kubernetes Grafana Sarah", the arbiter
+> hears "Sarah Kubernetes Grafana" — identical sets — so the repeated name was
+> delivered though the arbiter never said it twice.
+
+Correct, and it is the same class of error as the previous three: a comparison
+that is *almost* the property. Now a multiset check — every token in the suspected
+transcript must be spent against a matching token in the arbiter's, so a word
+appearing twice must have been heard twice. Two tests: the repeat case rejects,
+genuine repetition (heard twice) still passes.
+
+176 tests, 0 warnings.
+
 ## Round 4 — what changed since your round-3 FAIL
 
 You confirmed the capture-ownership fix and found no other lifecycle path, then

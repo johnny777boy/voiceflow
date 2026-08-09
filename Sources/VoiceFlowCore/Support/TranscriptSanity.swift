@@ -132,11 +132,23 @@ public enum TranscriptSanity {
     /// caller falls back to the other engine's transcript, which can mean losing a
     /// better spelling this one had. Inserting words the user never said is the
     /// failure this codebase treats as unacceptable; losing one is not.
+    /// Counts OCCURRENCES, not distinct words. A set comparison called
+    /// "Sarah Kubernetes Grafana Sarah" fully corroborated by "Sarah Kubernetes
+    /// Grafana" — identical word sets — and delivered the repeated name the other
+    /// engine never said. Every token must be spent against a matching token in
+    /// the corroborating transcript, so a word appearing twice needs to have been
+    /// heard twice.
     public static func isFullyCorroborated(_ text: String, by other: String) -> Bool {
-        let words = Set(normalized(text).split(separator: " ").map(String.init))
-        let corroborating = Set(normalized(other).split(separator: " ").map(String.init))
+        let words = normalized(text).split(separator: " ").map(String.init)
+        let corroborating = normalized(other).split(separator: " ").map(String.init)
         guard !words.isEmpty, !corroborating.isEmpty else { return false }
-        return words.isSubset(of: corroborating)
+        var available: [String: Int] = [:]
+        for word in corroborating { available[word, default: 0] += 1 }
+        for word in words {
+            guard let remaining = available[word], remaining > 0 else { return false }
+            available[word] = remaining - 1
+        }
+        return true
     }
 
     /// True when the ENTIRE transcript is a known phantom phrase AND at least one

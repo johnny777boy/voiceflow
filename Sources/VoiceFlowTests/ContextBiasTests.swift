@@ -59,6 +59,18 @@ func runContextBiasTests(_ suite: TestSuite) {
         s.expectFalse(TranscriptSanity.isFullyCorroborated("anything", by: ""))
     }
 
+    suite.test("echo: a word repeated more often than it was heard is not corroborated") { s in
+        // Codex round-4 FAIL: comparing distinct word SETS ignored occurrences, so
+        // an echo that simply repeats a term — "Sarah Kubernetes Grafana Sarah" —
+        // matched "Sarah Kubernetes Grafana" exactly and the extra name was
+        // delivered. Corroboration counts tokens, not types.
+        s.expectFalse(TranscriptSanity.isFullyCorroborated(
+            "Sarah Kubernetes Grafana Sarah", by: "Sarah Kubernetes Grafana"))
+        // Legitimate repetition still passes when it was genuinely heard twice.
+        s.expect(TranscriptSanity.isFullyCorroborated(
+            "Sarah Kubernetes Sarah", by: "Sarah Kubernetes Sarah again"))
+    }
+
     suite.test("echo: one better-heard word does not license the rest of the glossary") { s in
         // Whisper spelling the name right does NOT corroborate the terms the
         // arbiter never heard. We lose "Sarah" in favour of "Sara" here, and that

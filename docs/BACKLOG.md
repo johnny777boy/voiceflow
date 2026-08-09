@@ -3,17 +3,23 @@
 Last updated: 2026-08-08 (late session). Read CLAUDE.md first (workflow ritual +
 product principles), then this, then docs/ROADMAP.md (phased plan to sellable).
 
-## 🔤 Vocabulary is EMPTY — the single highest-value thing Yoni can do
+## 🔤 Vocabulary covers the RIGHT spellings, not the WRONG ones
 
-`defaults read com.voiceflow.dictation vocabulary` returns nothing: there are no
-entries at all, while `useWhisperEngine = 1` (large-v3 turbo, downloaded). So
-Phase 1's biasing is running with none of HIS words to bias toward — it only has
-screen-harvested nouns. This is why "Codex" comes out as "codices" (a real English
-word, so the recognizer never self-corrects) and why other proper nouns keep
-failing. One entry — spoken `codices` → written `Codex` — both feeds `Codex` to
-Whisper as a prompt token AND rewrites the miss. Phase 4 now offers such entries
-automatically after three hand-corrections (capitalized ⇒ passes the name-shaped
-gate). Ask him for his list of mangled terms and write them in.
+CORRECTION (an earlier note in this file claimed the vocabulary was empty — that
+read `defaults read com.voiceflow.dictation`, the wrong store). Settings live in
+`~/Library/Application Support/VoiceFlow/settings.json`, and there are **12
+entries**: `payload cms`→`Payload CMS`, `next js`→`Next.js`, `postgres`→
+`PostgreSQL`, `codex`→`Codex`, `type script`→`TypeScript`, etc.
+
+The real gap: every entry maps a CORRECTLY-heard spoken form to its written form.
+`VocabularyReplacer` only fires on a whole-word match of `spoken`, so when the
+recognizer produces "codices" the `codex`→`Codex` row never matches. The written
+forms DO feed Whisper's prompt bias (that part works), but the replacer — the
+safety net for when biasing loses — is covering the cases that don't need saving.
+
+Fix: add rows for the actual MISHEARINGS (`codices`→`Codex`, and whatever else he
+reports). Phase 4 now proposes exactly these automatically after three hand
+corrections, since a capitalized target passes the name-shaped gate.
 
 ## ✅ AUTONOMOUS RUN COMPLETE — Codex FAILed twice (both fixed), awaiting round 3
 
