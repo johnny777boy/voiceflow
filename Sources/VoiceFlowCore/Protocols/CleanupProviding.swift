@@ -9,19 +9,23 @@ public struct CleanupContext: Sendable, Equatable {
     /// Convert spoken punctuation words ("period" → ".") — opt-in, because the
     /// unconditional mapping destroys those words used as ordinary nouns.
     public let spokenPunctuationEnabled: Bool
+    /// Allow short casual utterances to skip the LLM pass entirely (latency).
+    public let fastPathEnabled: Bool
 
     public init(
         mode: DictationMode,
         strength: CleanupStrength,
         vocabulary: [VocabularyEntry],
         languageCode: String,
-        spokenPunctuationEnabled: Bool = false
+        spokenPunctuationEnabled: Bool = false,
+        fastPathEnabled: Bool = true
     ) {
         self.mode = mode
         self.strength = strength
         self.vocabulary = vocabulary
         self.languageCode = languageCode
         self.spokenPunctuationEnabled = spokenPunctuationEnabled
+        self.fastPathEnabled = fastPathEnabled
     }
 }
 
@@ -31,4 +35,20 @@ public protocol CleanupProviding: Sendable {
     /// Transform raw transcript text into cleaned text.
     /// Must be pure with respect to `context` for the deterministic engine.
     func clean(_ rawText: String, context: CleanupContext) async throws -> String
+    /// The instant, deterministic result — no model, no waiting. Used by
+    /// two-phase delivery to put text on screen before the polish arrives.
+    /// Default: the full `clean`, i.e. providers without a fast tier are
+    /// unaffected.
+    func deterministicClean(_ rawText: String, context: CleanupContext) async throws -> String
+    /// Give the provider a chance to load its model while the user is still
+    /// speaking, so the first dictation of a session isn't the slow one.
+    /// Must return immediately; default is a no-op.
+    func prewarm()
+}
+
+public extension CleanupProviding {
+    func deterministicClean(_ rawText: String, context: CleanupContext) async throws -> String {
+        try await clean(rawText, context: context)
+    }
+    func prewarm() {}
 }

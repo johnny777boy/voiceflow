@@ -3,7 +3,115 @@
 Last updated: 2026-08-08 (late session). Read CLAUDE.md first (workflow ritual +
 product principles), then this, then docs/ROADMAP.md (phased plan to sellable).
 
-## 🤖 AUTONOMOUS RUN — approved by Yoni 2026-08-08 (execute on resume)
+## 🔤 Vocabulary covers the RIGHT spellings, not the WRONG ones
+
+CORRECTION (an earlier note in this file claimed the vocabulary was empty — that
+read `defaults read com.voiceflow.dictation`, the wrong store). Settings live in
+`~/Library/Application Support/VoiceFlow/settings.json`, and there are **12
+entries**: `payload cms`→`Payload CMS`, `next js`→`Next.js`, `postgres`→
+`PostgreSQL`, `codex`→`Codex`, `type script`→`TypeScript`, etc.
+
+The real gap: every entry maps a CORRECTLY-heard spoken form to its written form.
+`VocabularyReplacer` only fires on a whole-word match of `spoken`, so when the
+recognizer produces "codices" the `codex`→`Codex` row never matches. The written
+forms DO feed Whisper's prompt bias (that part works), but the replacer — the
+safety net for when biasing loses — is covering the cases that don't need saving.
+
+Fix: add rows for the actual MISHEARINGS (`codices`→`Codex`, and whatever else he
+reports). Phase 4 now proposes exactly these automatically after three hand
+corrections, since a capitalized target passes the name-shaped gate.
+
+## ✅ AUTONOMOUS RUN COMPLETE — Codex FAILed twice (both fixed), awaiting round 3
+
+Phases 1–5 built, reviewed, fixed, and INSTALLED. `feature/upgrades-phase1-5`.
+173 tests, 0 warnings (debug + release). App rebuilt from the branch and installed
+to `/Applications/VoiceFlow.app` (relaunched, running).
+
+**SETTLED (Codex ruling, round 6, adopted 2026-08-09): the prompt-echo defense is
+UNCONDITIONAL.** No confidence gate, no energy gate — prompt continuation can be
+confident, and audible audio does not prove the emitted terms came from speech.
+The accepted price: vocabulary-dense sentences ("Payload CMS and Next.js") can
+trigger an extra ~1–2s Apple arbiter run, and when the engines disagree the
+arbiter's text wins (lose a word, never insert one). If live use shows the cost
+is too high, tighten `looksLikePromptEcho`'s text heuristic or the corroboration
+policy — do NOT reach for doubt signals. Do not relitigate without Codex.
+
+**Codex round 3 (`511221d`) returned FAIL — the `>= 0.5` threshold passed PARTIAL
+echoes:** user says three of their terms, the decoder completes the glossary with
+the other two, the arbiter hears the three real ones → 3/5 = 0.6 cleared it and
+"Payload CMS" was inserted. **Fixed by deleting the scoring entirely:** Whisper's
+text now stands only if EVERY word in it appears in the arbiter's transcript
+(`TranscriptSanity.isFullyCorroborated`), else the arbiter's transcript wins. No
+threshold left to tune. **Lesson worth keeping:** three consecutive FAILs were all
+similarity scores, and partial agreement is exactly the shape of a partial echo —
+when the requirement is absolute ("never deliver an uncorroborated word"), encode
+it exactly instead of approximating it.
+
+**Codex round 2 (`c48db01`) returned FAIL — confirmed the capture fix, then found
+the agreement check I added to make echo false-positives harmless was itself
+broken:** `wordOverlap` divided by the SHORTER transcript, so a subset scored a
+perfect 1.0. User says only "Sarah", Whisper echoes "Sarah Kubernetes Payload CMS
+Grafana", the arbiter correctly hears "Sarah" → declared agreement → the whole
+echo delivered. **Fixed:** divide by `max(a.count, b.count)`, so both transcripts
+must be covered; two regression tests pin it. Consequence accepted on purpose:
+genuine disagreement now prefers the arbiter and can drop a word the other engine
+heard — inserting unspoken words is unacceptable, losing one is not.
+
+**Codex round 1 (`fab60de`) returned FAIL — one blocking defect, correctly found:**
+prompt-echo recovery could lose real speech. The Apple arbiter took the recorder's
+shared capture URL and deleted it in a `defer` that runs even when it throws
+afterwards (failed model install), so an `.unavailable` verdict left the fallback
+engine nothing to read. The echo path I added throws on `.unavailable` (unlike the
+pre-existing phantom path, which falls through), so the echo fix introduced it.
+**Fixed:** the arbiter now works on a private COPY of the `.caf`, and
+`SpeechAnalyzerDictation` consumes the capture it was handed rather than the
+recorder's shared slot. Codex's second point (vocabulary-dense speech tripping the
+echo test) is handled by comparing the two transcripts — agreement ≥ 0.5 keeps
+Whisper's text — rather than by weakening detection.
+
+**Yoni's next actions, in order:**
+1. **Live-test the installed build** — it is the branch, not main. Rollback if
+   anything is wrong: `git checkout main && bash Scripts/build_app.sh release &&
+   ditto dist/VoiceFlow.app /Applications/VoiceFlow.app`.
+2. **Paste `docs/CODEX-BRIEF-UPGRADES.md` into Codex** and bring back the verdict.
+3. On PASS: merge ritual per CLAUDE.md §5 (tag `pre-upgrades-merge-2026-08-08`,
+   `git merge --no-ff`, tests on the merge, tag `verified-2026-08-08-upgrades`,
+   push with tags, rebuild+reinstall from main).
+4. **Then: the microphone idle-timeout branch** (see "Decided, not yet built").
+
+**Two reviewer agents ran on the full diff.** Both Criticals and all nine
+Importants were fixed in `539465b` (read that commit message — it is the record
+of where this code was actually dangerous). Headlines: Whisper could read its own
+bias glossary back as the transcript; Phase 5 voting was scoped to screen terms
+instead of the user's vocabulary; the AX screen read had no working timeout; and
+two-phase delivery held the dictation lock across the second LLM pass, which
+silently truncated the NEXT utterance.
+
+**Deferred, non-blocking** (both reviewers, Minor/Nit): `prewarm()` warms with
+hardcoded instructions that may not match the resolved mode; `setEditedAfterInsert`
+is a non-atomic read-modify-write that could resurrect a just-trimmed record;
+`SuggestedVocabularyStore.persist()` does small synchronous disk I/O on the main
+actor; `DictationStats` counts a <6s-old record as unedited before its correction
+window closes; the voting path normalizes whitespace when it substitutes;
+`AppCoordinator.cancel()` is unreachable dead code.
+
+## 🎤 Decided, not yet built — microphone idle-timeout (Yoni asked 2026-08-08)
+
+Yoni noticed the macOS mic indicator is on all day and asked why, since Wispr's
+only appears on press. Answer: the `AVAudioEngine` is kept warm permanently with a
+tap filling an ~0.8s pre-roll ring, so the audio from BEFORE the keypress is
+prepended and the first word isn't clipped — his own design decision, and it works.
+Measured cost on his machine: **0.1% CPU lifetime / 0.3% instantaneous, 123 MB,
+no power assertion** — so the objection is the indicator light and a little
+battery, NOT CPU load.
+
+Plan (own branch, HIS choice was "finish the current run first"): shut the engine
+down after N minutes idle, restart on key-down; stay warm during an active
+session. Risk is exactly the bug the warm mic exists to prevent — the first
+dictation after idle may clip. **Audio-capture path ⇒ CLAUDE.md rule 6: only with
+Yoni present, verified live + by WER.** Do not build it while he is asleep.
+
+## 🤖 AUTONOMOUS RUN — approved by Yoni 2026-08-08 (executed; kept for the record)
 
 Yoni's instruction: build the remaining upgrade phases AUTONOMOUSLY, verify with
 both reviewer agents, prepare the Codex brief + paste message, and STOP before

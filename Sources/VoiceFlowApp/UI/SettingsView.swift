@@ -36,6 +36,12 @@ struct SettingsView: View {
             Picker("Cleanup strength", selection: $draft.cleanupStrength) {
                 ForEach(CleanupStrength.allCases, id: \.self) { Text($0.displayName).tag($0) }
             }
+            Toggle("Fast path for short phrases", isOn: $draft.fastShortUtterances)
+            Text("Skips the AI polish for casual replies of eight words or fewer (\"on my way\"), where the offline rules already produce the same text about a second sooner. Questions and email always keep the AI pass.")
+                .font(.caption).foregroundStyle(.secondary)
+            Toggle("Insert instantly, polish in place (experimental)", isOn: $draft.twoPhaseDeliveryEnabled)
+            Text("Puts the offline result in the field the moment it's ready, then upgrades it in place when the AI pass finishes. Off by default — the in-place edit is abandoned if you've started typing, but it hasn't been lived on yet.")
+                .font(.caption).foregroundStyle(.secondary)
             Toggle("Spoken punctuation commands", isOn: $draft.spokenPunctuationEnabled)
             Text("Say \"period\" or \"comma\" to type . and , — off by default because it also rewrites those words when you mean them (\"during that period\" → \"during that.\").")
                 .font(.caption).foregroundStyle(.secondary)
@@ -66,6 +72,28 @@ struct SettingsView: View {
 
     private var vocabulary: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if !coordinator.vocabularySuggestions.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Learned from your corrections").font(.headline)
+                    Text("You've fixed these words the same way at least three times. Nothing changes until you add one — and adding one replaces that word in every future dictation, so only add names you always want spelled this way.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    ForEach(coordinator.vocabularySuggestions) { suggestion in
+                        HStack(spacing: 8) {
+                            Text(suggestion.heard).font(.callout.monospaced())
+                            Image(systemName: "arrow.right").font(.caption2).foregroundStyle(.secondary)
+                            Text(suggestion.corrected).font(.callout.monospaced().weight(.semibold))
+                            Text("×\(suggestion.occurrences)").font(.caption2).foregroundStyle(.tertiary)
+                            Spacer()
+                            Button("Add") { coordinator.acceptSuggestion(suggestion) }
+                            Button("Dismiss") { coordinator.dismissSuggestion(suggestion) }
+                                .buttonStyle(.plain).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .padding(10)
+                .background(.tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                Divider()
+            }
             Text("Spoken → written replacements").font(.headline)
             Table(draft.vocabulary) {
                 TableColumn("Spoken") { Text($0.spoken) }
@@ -93,6 +121,10 @@ struct SettingsView: View {
                 }
             WhisperStatusRow(manager: coordinator.whisperManager)
             Text("Uses on-device Whisper instead of Apple's engine — noticeably better for accents/non-native English, ~1–2s slower. Turning it on downloads the model (~1 GB) in the background; dictation keeps working on Apple's engine and switches to Whisper automatically when it's ready. Audio never leaves your Mac.")
+                .font(.caption).foregroundStyle(.secondary)
+            Divider()
+            Toggle("Learn names from the screen", isOn: $draft.screenContextEnabled)
+            Text("Reads the text of the window you're dictating into (via Accessibility — never a screenshot, never uploaded) and biases the recognizer toward the names on it, so people and product names come out spelled right. The text is used for that one dictation and discarded; password fields and password managers are never read.")
                 .font(.caption).foregroundStyle(.secondary)
             Divider()
             Toggle("Use AI cleanup (requires API key)", isOn: $draft.useLLMCleanup)

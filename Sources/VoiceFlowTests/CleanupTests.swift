@@ -87,8 +87,13 @@ func runCleanupTests(_ s: TestSuite) {
     }
 
     s.test("Pipeline uses LLM output when it succeeds") { s in
+        // Fast path off: "this is a test" is short enough to bypass the LLM
+        // entirely (see LatencyTests), and this case is about the LLM stage.
+        let context = CleanupContext(mode: .cleanWriting, strength: .standard,
+                                     vocabulary: VocabularyEntry.defaults,
+                                     languageCode: "en-US", fastPathEnabled: false)
         let pipeline = CleanupPipeline(llmProvider: FixedLLM(output: "REFINED"), useLLM: true)
-        let result = blockingAwait { (try? await pipeline.clean("this is a test", context: ctx(.cleanWriting))) ?? "ERR" }
+        let result = blockingAwait { (try? await pipeline.clean("this is a test", context: context)) ?? "ERR" }
         s.expectEqual(result, "REFINED")
     }
 

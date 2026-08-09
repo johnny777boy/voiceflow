@@ -32,6 +32,17 @@ public struct AppSettings: Codable, Sendable, Equatable {
     /// Convert spoken punctuation words ("period" → "."). OFF by default: the
     /// blind word→symbol mapping destroys those words used as ordinary nouns.
     public var spokenPunctuationEnabled: Bool
+    /// Bias the recognizer with proper nouns read from the frontmost window via
+    /// Accessibility (never screenshots, never uploaded). On by default: it is
+    /// the accuracy lever that makes names/jargon transcribe correctly.
+    public var screenContextEnabled: Bool
+    /// Let short casual utterances skip the LLM cleanup pass (saves ~1s on the
+    /// replies people send most often; questions and email always keep it).
+    public var fastShortUtterances: Bool
+    /// EXPERIMENTAL, off by default: insert the deterministic text instantly and
+    /// upgrade it in place when the LLM polish lands. Needs live testing before
+    /// it can be recommended — an in-place edit races the user's own typing.
+    public var twoPhaseDeliveryEnabled: Bool
 
     public init(
         microphoneDeviceID: String? = nil,
@@ -47,7 +58,10 @@ public struct AppSettings: Codable, Sendable, Equatable {
         launchAtLogin: Bool = false,
         useLLMCleanup: Bool = true,
         privacyRedactionEnabled: Bool = false,
-        spokenPunctuationEnabled: Bool = false
+        spokenPunctuationEnabled: Bool = false,
+        screenContextEnabled: Bool = true,
+        fastShortUtterances: Bool = true,
+        twoPhaseDeliveryEnabled: Bool = false
     ) {
         self.microphoneDeviceID = microphoneDeviceID
         self.hotkey = hotkey
@@ -63,6 +77,9 @@ public struct AppSettings: Codable, Sendable, Equatable {
         self.useLLMCleanup = useLLMCleanup
         self.privacyRedactionEnabled = privacyRedactionEnabled
         self.spokenPunctuationEnabled = spokenPunctuationEnabled
+        self.screenContextEnabled = screenContextEnabled
+        self.fastShortUtterances = fastShortUtterances
+        self.twoPhaseDeliveryEnabled = twoPhaseDeliveryEnabled
     }
 
     /// Backward-compatible decoding: settings.json written by older builds lacks
@@ -85,6 +102,9 @@ public struct AppSettings: Codable, Sendable, Equatable {
         useLLMCleanup = try c.decodeIfPresent(Bool.self, forKey: .useLLMCleanup) ?? d.useLLMCleanup
         privacyRedactionEnabled = try c.decodeIfPresent(Bool.self, forKey: .privacyRedactionEnabled) ?? d.privacyRedactionEnabled
         spokenPunctuationEnabled = try c.decodeIfPresent(Bool.self, forKey: .spokenPunctuationEnabled) ?? d.spokenPunctuationEnabled
+        screenContextEnabled = try c.decodeIfPresent(Bool.self, forKey: .screenContextEnabled) ?? d.screenContextEnabled
+        fastShortUtterances = try c.decodeIfPresent(Bool.self, forKey: .fastShortUtterances) ?? d.fastShortUtterances
+        twoPhaseDeliveryEnabled = try c.decodeIfPresent(Bool.self, forKey: .twoPhaseDeliveryEnabled) ?? d.twoPhaseDeliveryEnabled
     }
 
     public static let `default` = AppSettings()

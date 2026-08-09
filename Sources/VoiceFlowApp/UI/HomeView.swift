@@ -181,6 +181,11 @@ struct HomeView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("Recent").font(.headline)
+                if coordinator.stats.sampleCount > 0 {
+                    Text(statsSummary)
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .help("Median time from releasing the key to text appearing, and how often you left the text untouched — measured on your own dictations, stored only on this Mac.")
+                }
                 Spacer()
                 if !coordinator.recentRecords.isEmpty {
                     Button("Clear") { coordinator.clearHistory() }
@@ -206,6 +211,13 @@ struct HomeView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
+    private var statsSummary: String {
+        let stats = coordinator.stats
+        let latency = stats.medianInsertLatency > 0
+            ? String(format: "%.1fs median", stats.medianInsertLatency) : "—"
+        return "\(latency)  ·  \(Int((stats.zeroEditRate * 100).rounded()))% unedited  (\(stats.sampleCount))"
+    }
+
     private var background: some View {
         LinearGradient(colors: [Color(nsColor: .windowBackgroundColor),
                                 Color(red: 0.36, green: 0.42, blue: 0.98).opacity(0.06)],
@@ -219,6 +231,14 @@ private struct HistoryCard: View {
     let onCopy: () -> Void
     let onDelete: () -> Void
 
+    /// The verbatim transcript, shown only when cleanup actually changed
+    /// something — so any word cleanup added, dropped or swapped is visible
+    /// rather than taking the user's word for it.
+    private var rawDiffers: Bool {
+        record.rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+            != record.cleanText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
@@ -227,11 +247,30 @@ private struct HistoryCard: View {
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)   // show the FULL script, wrapping
                     .frame(maxWidth: .infinity, alignment: .leading)
+                if rawDiffers {
+                    HStack(alignment: .top, spacing: 5) {
+                        Text("heard").font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
+                        Text(record.rawText)
+                            .font(.caption).foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
                 HStack(spacing: 8) {
                     Label(record.appName ?? "Unknown", systemImage: "app.dashed")
                         .font(.caption2).foregroundStyle(.secondary)
                     Text(record.mode.displayName).font(.caption2).foregroundStyle(.tertiary)
-                    Text(String(format: "%.1fs", record.latencySeconds)).font(.caption2).foregroundStyle(.tertiary)
+                    // Release-to-insert is the number that describes the feel;
+                    // fall back to the older total for pre-Phase-2 records.
+                    Text(record.insertLatencySeconds > 0
+                         ? String(format: "%.1fs to insert", record.insertLatencySeconds)
+                         : String(format: "%.1fs", record.latencySeconds))
+                        .font(.caption2).foregroundStyle(.tertiary)
+                    if record.editedAfterInsert {
+                        Label("edited", systemImage: "pencil")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                    }
                 }
             }
             Spacer(minLength: 0)

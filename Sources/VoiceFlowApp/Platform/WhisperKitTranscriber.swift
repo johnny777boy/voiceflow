@@ -83,9 +83,42 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         return result.sorted()
     }
 
+    /// Encode the per-dictation context into Whisper `promptTokens`.
+    ///
+    /// WhisperKit prefixes these with `<|startofprev|>`, i.e. Whisper treats them
+    /// as "text that preceded this audio" — the documented way to bias decoding
+    /// toward names and jargon. Two hard rules, both enforced here as well as by
+    /// WhisperKit: only non-special tokens may be fed (a special token would
+    /// hijack the decoder's task/language prefill), and the prompt must stay far
+    /// below half the 448-token context so it can never crowd out the audio.
+    ///
+    /// Biasing changes *probabilities*, but it is NOT free of risk: because the
+    /// prompt is presented as preceding text, a decoder with little to work with
+    /// can continue it and emit the glossary as the transcript. That is real and
+    /// documented, so the output is checked for prompt echo after decode
+    /// (`TranscriptSanity.looksLikePromptEcho`) — never trusted blind.
+    private static func promptTokens(
+        for context: VoiceFlowCore.TranscriptionContext,
+        tokenizer: any WhisperTokenizer,
+        maxTokens: Int = 180
+    ) -> [Int]? {
+        let text = context.promptText()
+        guard !text.isEmpty else { return nil }
+        let specialBegin = tokenizer.specialTokens.specialTokenBegin
+        let tokens = tokenizer.encode(text: text).filter { $0 < specialBegin }
+        guard !tokens.isEmpty else { return nil }
+        return Array(tokens.prefix(maxTokens))
+    }
+
     func requestPermission() async -> Bool { true }   // mic handled by the recorder
 
     func transcribe(_ audio: AudioCapture, languageCode: String) async throws -> VoiceFlowCore.TranscriptionResult {
+        try await transcribe(audio, languageCode: languageCode, context: .empty)
+    }
+
+    func transcribe(
+        _ audio: AudioCapture, languageCode: String, context: VoiceFlowCore.TranscriptionContext
+    ) async throws -> VoiceFlowCore.TranscriptionResult {
         guard let (wk, suppress) = currentPipeline() else {
             throw VoiceFlowError.audioEngineFailure("Whisper model not ready.")
         }
@@ -144,6 +177,20 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         options.wordTimestamps = false
         options.chunkingStrategy = ChunkingStrategy.none
 
+        // Context biasing: the user's vocabulary + proper nouns read off the
+        // frontmost window. Verified against the pinned WhisperKit 0.18.0
+        // (TextDecoder.prefillDecoderInputs): prompt tokens are prefixed with
+        // startOfPreviousToken, filtered below specialTokenBegin, and the prefill
+        // KV-cache is bypassed whenever promptTokens is set — the PR #514
+        // behavior this feature depends on.
+        if let tokenizer = wk.tokenizer,
+           let prompt = Self.promptTokens(for: context, tokenizer: tokenizer) {
+            options.promptTokens = prompt
+            options.usePrefillPrompt = true
+            // Terms come from the user's screen: count in the clear, contents private.
+            Log.transcription.notice("Whisper context bias: \(context.orderedTerms.count, privacy: .public) terms, \(prompt.count, privacy: .public) tokens — \(context.promptText(), privacy: .private)")
+        }
+
         let results = try await wk.transcribe(audioArray: samples, decodeOptions: options)
         let text = results.map { $0.text }.joined(separator: " ")
             .replacingOccurrences(of: "\n", with: " ")
@@ -171,29 +218,66 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         // Short real utterances ("yes", "okay send it") are safe: the arbiter
         // hears them and approves (proven live same day).
         let wordCount = text.split(whereSeparator: { $0 == " " }).count
+
+        // Prompt echo: the decoder read our bias glossary back instead of the
+        // audio. Handled BEFORE the phantom check because it has a different
+        // remedy — the text isn't a stock hallucination to veto, it's our own
+        // context leaking into the transcript, and it can be any length, so the
+        // "short clip, few words" test below would never catch it. Delivering it
+        // would both insert words the user never said and paste what was on their
+        // screen into whatever they're typing.
+        if TranscriptSanity.looksLikePromptEcho(text: text, promptTerms: context.orderedTerms) {
+            Log.transcription.error("Whisper echoed the context prompt — discarding the decode")
+            switch try await consultArbiter(audio, languageCode: languageCode, context: context) {
+            case .heard(let second):
+                try? FileManager.default.removeItem(at: url)
+                // The other engine had no prompt to echo, so it is the tiebreak.
+                // Whisper's text stands ONLY if every word in it was independently
+                // produced by that engine too — then nothing came from the
+                // glossary and the echo test was a false alarm on a genuinely
+                // vocabulary-dense sentence. Anything less is a partial echo: the
+                // user says three of their terms and the decoder completes the
+                // list, which is how "Payload CMS" gets inserted into a sentence
+                // that never contained it.
+                if TranscriptSanity.isFullyCorroborated(text, by: second) {
+                    Log.transcription.notice("Echo suspicion cleared — every word was corroborated by the second engine")
+                    return VoiceFlowCore.TranscriptionResult(text: text)
+                }
+                Log.transcription.notice("Arbiter transcript used in place of the echoed decode")
+                return VoiceFlowCore.TranscriptionResult(text: second)
+            case .silence, .unavailable:
+                // Silence ⇒ there was nothing to hear anyway. Unavailable ⇒ we
+                // cannot verify, and a contaminated transcript must not be
+                // delivered on faith; the capture file is left intact so the
+                // Apple fallback re-runs it cleanly.
+                throw VoiceFlowError.emptyTranscript
+            }
+        }
+
         let suspicious = TranscriptSanity.isOutroPhrase(text)
             || (clipSeconds <= 3.0 && wordCount <= 4)
         if suspicious {
             Log.transcription.notice("Whisper phantom candidate \"\(text, privacy: .public)\" (dur=\(clipSeconds, privacy: .public)s logProb=\(minLogProb ?? 0, privacy: .public) maxRMS=\(maxChunkRMS, privacy: .public)) — asking arbiter")
             var arbiterUnavailable = silenceArbiter == nil
-            if let arbiter = silenceArbiter {
-                do {
-                    // Consumes + deletes the capture file via the engine's own path.
-                    _ = try await arbiter.transcribe(audio, languageCode: languageCode)
+            if silenceArbiter != nil {
+                switch try await consultArbiter(audio, languageCode: languageCode, context: context) {
+                case .heard(let second):
                     Log.transcription.notice("Arbiter heard speech — delivering Whisper text")
-                    return VoiceFlowCore.TranscriptionResult(text: text)
-                } catch VoiceFlowError.emptyTranscript {
+                    // The second opinion is already paid for; let it fix a name.
+                    let merged = vote(primary: text, secondary: second, context: context)
+                    // We still own the original capture (the arbiter only ever saw
+                    // a copy), and this is the success path, so consume it here.
+                    try? FileManager.default.removeItem(at: url)
+                    return VoiceFlowCore.TranscriptionResult(text: merged)
+                case .silence:
                     // The one verdict that means "silence": discard the phantom.
                     Log.transcription.notice("Arbiter heard nothing — phantom discarded")
                     throw VoiceFlowError.emptyTranscript
-                } catch is CancellationError {
-                    throw CancellationError()   // a cancelled dictation stays cancelled
-                } catch {
+                case .unavailable:
                     // Infrastructure failure (model asset, file read, analyzer) is
                     // NOT a silence verdict — a real "Yes." must not be eaten
                     // because Apple's model was mid-download. Fall through to the
                     // signal-based filter instead.
-                    Log.transcription.error("Arbiter unavailable (\(String(describing: error), privacy: .public)) — using corroboration filter")
                     arbiterUnavailable = true
                 }
             }
@@ -203,11 +287,101 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
             ) {
                 throw VoiceFlowError.emptyTranscript
             }
+        } else if silenceArbiter != nil,
+                  DualEngineVoting.containsNearMiss(
+                      text: text,
+                      // The user's OWN vocabulary only — deliberately not the
+                      // screen terms. Window chrome ("Report", "Meeting",
+                      // "Monday") sits one edit from ordinary words, so including
+                      // it fired the second engine on a large fraction of normal
+                      // sentences (spending the second Phase 3 saved) and let a
+                      // UI label overrule a correctly-heard word: "see you Sunday"
+                      // → "see you Monday". Screen terms bias the decoder; they do
+                      // not get a vote on the result.
+                      vocabulary: context.vocabularyTerms,
+                      // A decoder that was unsure gets the wider net.
+                      maxEdits: (minLogProb ?? 0) < -0.55 ? 2 : 1
+                  ) {
+            // Phase 5 — word-level voting. Whisper produced something that is one
+            // or two characters away from a term the user cares about, which is
+            // what a misheard name looks like. Ask the other engine about the SAME
+            // audio and take its word only where it matches the vocabulary and
+            // Whisper's doesn't. Bounded on purpose: no near-miss, no second run,
+            // so the ordinary dictation pays nothing.
+            Log.transcription.notice("Vocabulary near-miss in Whisper output — asking the second engine")
+            if case .heard(let second) = try await consultArbiter(audio, languageCode: languageCode, context: context) {
+                let merged = vote(primary: text, secondary: second, context: context)
+                try? FileManager.default.removeItem(at: url)
+                return VoiceFlowCore.TranscriptionResult(text: merged)
+            }
+            // Silence or unavailable: a near-miss is not a phantom signal, so the
+            // Whisper text stands exactly as decoded.
         }
         // Success: the capture file is consumed here. On ANY failure above we leave
         // the file alone — the FallbackTranscriber re-runs the Apple engine, which
         // reads the same file via its internal URL.
         try? FileManager.default.removeItem(at: url)
         return VoiceFlowCore.TranscriptionResult(text: text)
+    }
+
+    /// What the second engine made of the same recording.
+    private enum ArbiterVerdict {
+        case heard(String)
+        case silence
+        case unavailable
+    }
+
+    /// Run the Apple engine over a PRIVATE COPY of the same capture.
+    ///
+    /// The copy is the whole point. The Apple engine takes ownership of whatever
+    /// capture it is given and deletes it — including when it throws afterwards
+    /// (a failed model install). Handing it the original meant a second opinion
+    /// that failed took the only recording with it, leaving the fallback engine
+    /// nothing to read and swallowing real speech. The original now survives
+    /// every arbiter outcome, and this method's caller decides when to delete it.
+    private func consultArbiter(
+        _ audio: AudioCapture, languageCode: String, context: VoiceFlowCore.TranscriptionContext
+    ) async throws -> ArbiterVerdict {
+        guard let arbiter = silenceArbiter else { return .unavailable }
+        guard let source = audio.fileURL else { return .unavailable }
+        let copyURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("voiceflow-arbiter-\(UUID().uuidString).caf")
+        do {
+            try FileManager.default.copyItem(at: source, to: copyURL)
+        } catch {
+            Log.transcription.error("Could not copy capture for the arbiter (\(String(describing: error), privacy: .public))")
+            return .unavailable
+        }
+        // Belt and braces: the arbiter deletes the copy itself, but a throw before
+        // it gets that far must not leave a stray file behind.
+        defer { try? FileManager.default.removeItem(at: copyURL) }
+        let capture = AudioCapture(
+            samples: audio.samples, sampleRate: audio.sampleRate,
+            duration: audio.duration, fileURL: copyURL
+        )
+        do {
+            let result = try await arbiter.transcribe(capture, languageCode: languageCode, context: context)
+            let trimmed = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? .silence : .heard(trimmed)
+        } catch VoiceFlowError.emptyTranscript {
+            return .silence
+        } catch is CancellationError {
+            throw CancellationError()   // a cancelled dictation stays cancelled
+        } catch {
+            Log.transcription.error("Arbiter unavailable (\(String(describing: error), privacy: .public))")
+            return .unavailable
+        }
+    }
+
+    /// Apply word-level voting, logging any word that changed hands.
+    private func vote(
+        primary: String, secondary: String, context: VoiceFlowCore.TranscriptionContext
+    ) -> String {
+        // Vocabulary only, never screen terms — see the near-miss call site.
+        let result = DualEngineVoting.reconcile(
+            primary: primary, secondary: secondary, vocabulary: context.vocabularyTerms)
+        guard result.changedAnything else { return primary }
+        Log.transcription.notice("Dual-engine vote replaced \(result.substitutions.count, privacy: .public) word(s) with vocabulary-consistent alternatives")
+        return result.text
     }
 }

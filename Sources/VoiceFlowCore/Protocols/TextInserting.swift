@@ -29,8 +29,14 @@ public protocol TextInserting: AnyObject, Sendable {
     func copyToClipboard(_ text: String)
     /// Inspect the current destination's capabilities (Accessibility support, secure input).
     func currentCapabilities() -> DestinationCapabilities
+    /// Swap the text this inserter most recently delivered for `newText`, in
+    /// place (two-phase delivery). Must return false — changing nothing — unless
+    /// it can prove the delivered text is still sitting untouched at the caret.
+    /// Default: unsupported.
+    func replaceLastInsertion(with newText: String) -> Bool
 }
 
 public extension TextInserting {
     func prepareForInsertion(intoBundleIdentifier bundleIdentifier: String?) {}
+    func replaceLastInsertion(with newText: String) -> Bool { false }
 }

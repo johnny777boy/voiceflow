@@ -27,6 +27,10 @@ public protocol AudioRecording: AnyObject, Sendable {
     var isRecording: Bool { get }
     /// Begin capturing from the configured input device.
     func startRecording() throws
+    /// Let the engine keep capturing for a beat before `stopRecording()`, so the
+    /// last word isn't clipped. Suspends rather than blocking a thread; engines
+    /// that need no drain inherit the no-op default.
+    func drainBeforeStop() async
     /// Stop capturing and return what was recorded.
     func stopRecording() throws -> AudioCapture
     /// Request microphone authorization; returns whether granted.
@@ -38,4 +42,5 @@ public protocol AudioRecording: AnyObject, Sendable {
 
 public extension AudioRecording {
     func discardPendingCapture() {}
+    func drainBeforeStop() async {}
 }

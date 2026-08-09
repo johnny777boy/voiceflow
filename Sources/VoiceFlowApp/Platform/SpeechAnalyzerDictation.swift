@@ -137,14 +137,34 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
         Log.transcription.notice("SA record: warm=\(self.engine != nil, privacy: .public) prerollFrames=\(prerollFrames, privacy: .public)")
     }
 
+    /// The lock-guarded view of "are we capturing", safe to read from any thread.
+    private var isRecordingSynchronized: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return recording
+    }
+
+    /// Drain: let the tap keep writing for a beat so the trailing audio (the last
+    /// word) lands in the file before it closes.
+    ///
+    /// The wait itself is unchanged — same 0.18s, same tap, same file, same
+    /// pre-roll — but it is now an async suspension performed BEFORE the
+    /// main-thread stop, instead of a `Thread.sleep` inside it. Blocking the main
+    /// thread for 0.18s on every dictation stalled the overlay animation and the
+    /// window at exactly the moment the user is watching for feedback.
+    func drainBeforeStop() async {
+        // Read the LOCK-GUARDED flag, not the main-thread `isRecording`: this is
+        // the one method on this type that runs off the main thread, so the plain
+        // property would be an unsynchronized cross-thread read. Same 0.18s wait,
+        // same tap, same file — only the read is synchronized.
+        guard isRecordingSynchronized else { return }
+        try? await Task.sleep(nanoseconds: 180_000_000)
+    }
+
     func stopRecording() throws -> AudioCapture { try onMain { try self.stopRecordingImpl() } }
 
     private func stopRecordingImpl() throws -> AudioCapture {
         guard isRecording else { return AudioCapture(samples: [], sampleRate: 16_000, duration: 0) }
         isRecording = false
-        // Drain: keep writing for a beat so the trailing audio (the last word) is
-        // captured before we stop writing. The engine stays WARM for next time.
-        Thread.sleep(forTimeInterval: 0.18)
         lock.lock()
         recording = false
         let file = audioFile
@@ -171,7 +191,32 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
     }
 
     func transcribe(_ audio: AudioCapture, languageCode: String) async throws -> TranscriptionResult {
-        guard let url = takeFileURL() else { throw VoiceFlowError.emptyTranscript }
+        try await transcribe(audio, languageCode: languageCode, extraTerms: [])
+    }
+
+    /// Context-biased variant. Apple's `contextualStrings` are weakly honored by
+    /// SpeechTranscriber (see docs/WISPR_GAP_FINDINGS.md), so the on-screen terms
+    /// mostly earn their keep through the n-best re-ranking below — which is
+    /// deterministic and can only ever pick between candidates the model already
+    /// produced.
+    func transcribe(
+        _ audio: AudioCapture, languageCode: String, context: TranscriptionContext
+    ) async throws -> TranscriptionResult {
+        try await transcribe(audio, languageCode: languageCode, extraTerms: context.orderedTerms)
+    }
+
+    private func transcribe(
+        _ audio: AudioCapture, languageCode: String, extraTerms: [String]
+    ) async throws -> TranscriptionResult {
+        // Transcribe the capture we were HANDED, not the recorder's shared slot.
+        //
+        // Ownership matters here: as a second-opinion arbiter this engine is given
+        // a private copy, and consuming the recorder's shared URL instead would
+        // destroy the only capture — including on the paths where this method
+        // throws AFTER taking it (a failed model install, below). The caller that
+        // owns the original would then have nothing left to fall back to, and real
+        // speech would be silently swallowed.
+        guard let url = audio.fileURL ?? takeFileURL() else { throw VoiceFlowError.emptyTranscript }
         defer { try? FileManager.default.removeItem(at: url) }
 
         // Resolve to a locale the recognizer actually supports (region-aware), from
@@ -193,7 +238,9 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
 
         // Bias recognition toward the user's names/terms/jargon. This was declared
         // but silently dropped — the single highest-value accuracy fix.
-        let terms = contextualStrings
+        var terms = contextualStrings
+        for term in extraTerms where !terms.contains(term) { terms.append(term) }
+        terms = Array(terms.prefix(150))
         if !terms.isEmpty {
             let context = AnalysisContext()
             context.contextualStrings = [.general: terms]

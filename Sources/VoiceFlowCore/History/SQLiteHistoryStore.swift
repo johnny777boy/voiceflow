@@ -30,10 +30,27 @@ public final class SQLiteHistoryStore: HistoryStoring, @unchecked Sendable {
             insertionStrategy TEXT,
             latencySeconds REAL NOT NULL,
             errorMessage TEXT,
-            createdAt REAL NOT NULL
+            createdAt REAL NOT NULL,
+            insertLatencySeconds REAL NOT NULL DEFAULT 0,
+            editedAfterInsert INTEGER NOT NULL DEFAULT 0
         );
         """)
         try execute("CREATE INDEX IF NOT EXISTS idx_transcripts_createdAt ON transcripts(createdAt DESC);")
+        migrate()
+    }
+
+    /// Additive migrations for databases created by older builds. Columns are
+    /// only ever APPENDED, because `readRow` addresses columns positionally —
+    /// inserting one in the middle would silently mis-read every old row.
+    /// `ALTER TABLE ADD COLUMN` fails harmlessly when the column already exists,
+    /// which is exactly the "already migrated" case.
+    private func migrate() {
+        for column in [
+            "insertLatencySeconds REAL NOT NULL DEFAULT 0",
+            "editedAfterInsert INTEGER NOT NULL DEFAULT 0",
+        ] {
+            try? execute("ALTER TABLE transcripts ADD COLUMN \(column);")
+        }
     }
 
     deinit { sqlite3_close(db) }
@@ -44,8 +61,9 @@ public final class SQLiteHistoryStore: HistoryStoring, @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         let sql = """
         INSERT OR REPLACE INTO transcripts
-        (id, rawText, cleanText, appBundleIdentifier, appName, mode, insertionStrategy, latencySeconds, errorMessage, createdAt)
-        VALUES (?,?,?,?,?,?,?,?,?,?);
+        (id, rawText, cleanText, appBundleIdentifier, appName, mode, insertionStrategy, latencySeconds,
+         errorMessage, createdAt, insertLatencySeconds, editedAfterInsert)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?);
         """
         let stmt = try prepare(sql)
         defer { sqlite3_finalize(stmt) }
@@ -59,6 +77,8 @@ public final class SQLiteHistoryStore: HistoryStoring, @unchecked Sendable {
         sqlite3_bind_double(stmt, 8, record.latencySeconds)
         bindText(stmt, 9, record.errorMessage)
         sqlite3_bind_double(stmt, 10, record.createdAt.timeIntervalSince1970)
+        sqlite3_bind_double(stmt, 11, record.insertLatencySeconds)
+        sqlite3_bind_int(stmt, 12, record.editedAfterInsert ? 1 : 0)
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw VoiceFlowError.historyUnavailable("save failed: \(lastErrorMessage())")
         }
@@ -127,9 +147,16 @@ public final class SQLiteHistoryStore: HistoryStoring, @unchecked Sendable {
         let latency = sqlite3_column_double(stmt, 7)
         let error = columnText(stmt, 8)
         let created = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 9))
+        // Columns 10/11 exist only after the additive migration; a row read from
+        // a database opened by an older build simply reports the defaults.
+        let columns = sqlite3_column_count(stmt)
+        let insertLatency = columns > 10 ? sqlite3_column_double(stmt, 10) : 0
+        let edited = columns > 11 ? sqlite3_column_int(stmt, 11) != 0 : false
         return TranscriptRecord(
             id: id, rawText: raw, cleanText: clean, appBundleIdentifier: bundle, appName: appName,
-            mode: mode, insertionStrategy: strategy, latencySeconds: latency, errorMessage: error, createdAt: created)
+            mode: mode, insertionStrategy: strategy, latencySeconds: latency,
+            insertLatencySeconds: insertLatency, editedAfterInsert: edited,
+            errorMessage: error, createdAt: created)
     }
 
     // MARK: - Low-level helpers

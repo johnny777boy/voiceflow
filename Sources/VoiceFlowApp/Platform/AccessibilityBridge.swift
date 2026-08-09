@@ -31,10 +31,57 @@ enum AX {
         AXUIElementSetAttributeValue(element, attribute as CFString, value as CFString) == .success
     }
 
+    /// The caret offset (UTF-16 units) from the selected-text range, if readable.
+    static func caretLocation(_ element: AXUIElement) -> Int? {
+        var raw: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &raw) == .success,
+              let r = raw, CFGetTypeID(r) == AXValueGetTypeID() else { return nil }
+        var range = CFRange()
+        guard AXValueGetValue(r as! AXValue, .cfRange, &range) else { return nil }
+        // A non-empty selection means the user is selecting, not typing at a caret.
+        guard range.length == 0 else { return nil }
+        return range.location
+    }
+
+    /// The current selection as (location, length) in UTF-16 units, if readable.
+    /// Unlike `caretLocation` this does not require an empty selection — it is
+    /// used to confirm a selection we just made is still the one in place.
+    static func selectedRange(_ element: AXUIElement) -> (location: Int, length: Int)? {
+        var raw: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &raw) == .success,
+              let r = raw, CFGetTypeID(r) == AXValueGetTypeID() else { return nil }
+        var range = CFRange()
+        guard AXValueGetValue(r as! AXValue, .cfRange, &range) else { return nil }
+        return (location: range.location, length: range.length)
+    }
+
+    /// Select an explicit range so the next `kAXSelectedTextAttribute` write
+    /// replaces exactly those characters.
+    static func setSelectedRange(_ element: AXUIElement, location: Int, length: Int) -> Bool {
+        var range = CFRange(location: location, length: length)
+        guard let value = AXValueCreate(.cfRange, &range) else { return false }
+        return AXUIElementSetAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, value) == .success
+    }
+
     /// The system-wide focused UI element (requires Accessibility permission).
     static func focusedElement() -> AXUIElement? {
         let system = AXUIElementCreateSystemWide()
-        return element(system, kAXFocusedUIElementAttribute)
+        return element(system, kAXFocusedUIElementAttribute).map { bounded($0) }
+    }
+
+    /// Cap how long any single AX round-trip on this element may block the
+    /// calling thread.
+    ///
+    /// AX calls are synchronous IPC into another process and default to a SIX
+    /// SECOND timeout, so an unresponsive app (a big Electron paste, a beachball)
+    /// can freeze whatever thread touches it — including the main thread, where
+    /// that means no overlay, no menu bar and no hotkey. The timeout binds to the
+    /// single object it is set on, never to its children, so it must be applied
+    /// to every element we intend to talk to.
+    @discardableResult
+    static func bounded(_ element: AXUIElement, seconds: Float = 0.25) -> AXUIElement {
+        AXUIElementSetMessagingTimeout(element, seconds)
+        return element
     }
 
     /// Text-entry roles that can receive dictated text.
