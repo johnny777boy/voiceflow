@@ -267,6 +267,11 @@ private struct HistoryCard: View {
                          ? String(format: "%.1fs to insert", record.insertLatencySeconds)
                          : String(format: "%.1fs", record.latencySeconds))
                         .font(.caption2).foregroundStyle(.tertiary)
+                    // The itemized bill: where those seconds actually went.
+                    if record.transcribeSeconds > 0 {
+                        Text(Self.stageBreakdown(record))
+                            .font(.caption2.monospaced()).foregroundStyle(.tertiary)
+                    }
                     if record.editedAfterInsert {
                         Label("edited", systemImage: "pencil")
                             .font(.caption2).foregroundStyle(.tertiary)
@@ -280,5 +285,22 @@ private struct HistoryCard: View {
         .padding(11)
         .background(.background.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.quaternary))
+    }
+
+    /// "1.4s whisper + 0.9s check + 0.3s polish" — the per-stage bill, shown only
+    /// for the stages that actually cost something. "check" is the second-opinion
+    /// engine (part of the transcribe time, broken out because it is the variable
+    /// cost); "polish" is the cleanup pipeline.
+    static func stageBreakdown(_ record: TranscriptRecord) -> String {
+        var parts: [String] = []
+        let decode = max(0, record.transcribeSeconds - record.arbiterSeconds)
+        parts.append(String(format: "%.1fs %@", decode, record.engineUsed ?? "decode"))
+        if record.arbiterSeconds > 0.05 {
+            parts.append(String(format: "%.1fs check", record.arbiterSeconds))
+        }
+        if record.cleanupSeconds > 0.05 {
+            parts.append(String(format: "%.1fs polish", record.cleanupSeconds))
+        }
+        return parts.joined(separator: " + ")
     }
 }

@@ -328,6 +328,7 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
         // speech would be silently swallowed.
         guard let url = audio.fileURL ?? takeFileURL() else { throw VoiceFlowError.emptyTranscript }
         defer { try? FileManager.default.removeItem(at: url) }
+        let decodeStarted = Date()
 
         // Resolve to a locale the recognizer actually supports (region-aware), from
         // the requested language code (falling back to the preferred language).
@@ -383,7 +384,9 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         Log.transcription.notice("SA transcribed \(trimmed.count, privacy: .public) chars")
         guard !trimmed.isEmpty else { throw VoiceFlowError.emptyTranscript }
-        return TranscriptionResult(text: trimmed)
+        return TranscriptionResult(
+            text: trimmed, engineName: "apple",
+            decodeSeconds: Date().timeIntervalSince(decodeStarted))
     }
 
     // MARK: - Model asset

@@ -5,9 +5,25 @@ public struct TranscriptionResult: Sendable, Equatable {
     public let text: String
     /// Recognizer confidence 0...1 when available (else 1).
     public let confidence: Float
-    public init(text: String, confidence: Float = 1) {
+    /// Which engine produced `text` ("whisper" / "apple"), when known. Purely
+    /// diagnostic — nothing may branch on it.
+    public let engineName: String?
+    /// Seconds the primary model spent decoding, when the engine measured it.
+    public let decodeSeconds: Double?
+    /// Seconds spent consulting the second-opinion engine (phantom check, echo
+    /// check, or vocabulary voting), when one ran. nil = no arbiter ran. This is
+    /// the number that explains why two dictations of the same length can differ
+    /// by seconds.
+    public let arbiterSeconds: Double?
+    public init(
+        text: String, confidence: Float = 1,
+        engineName: String? = nil, decodeSeconds: Double? = nil, arbiterSeconds: Double? = nil
+    ) {
         self.text = text
         self.confidence = confidence
+        self.engineName = engineName
+        self.decodeSeconds = decodeSeconds
+        self.arbiterSeconds = arbiterSeconds
     }
 }
 

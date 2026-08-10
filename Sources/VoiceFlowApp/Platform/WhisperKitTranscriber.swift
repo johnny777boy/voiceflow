@@ -191,7 +191,9 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
             Log.transcription.notice("Whisper context bias: \(context.orderedTerms.count, privacy: .public) terms, \(prompt.count, privacy: .public) tokens — \(context.promptText(), privacy: .private)")
         }
 
+        let decodeStarted = Date()
         let results = try await wk.transcribe(audioArray: samples, decodeOptions: options)
+        let decodeSeconds = Date().timeIntervalSince(decodeStarted)
         let text = results.map { $0.text }.joined(separator: " ")
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -228,7 +230,9 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         // screen into whatever they're typing.
         if TranscriptSanity.looksLikePromptEcho(text: text, promptTerms: context.orderedTerms) {
             Log.transcription.error("Whisper echoed the context prompt — discarding the decode")
-            switch try await consultArbiter(audio, languageCode: languageCode, context: context) {
+            let (echoVerdict, echoArbiterSeconds) = try await consultArbiterTimed(
+                audio, languageCode: languageCode, context: context)
+            switch echoVerdict {
             case .heard(let second):
                 try? FileManager.default.removeItem(at: url)
                 // The other engine had no prompt to echo, so it is the tiebreak.
@@ -241,10 +245,14 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
                 // that never contained it.
                 if TranscriptSanity.isFullyCorroborated(text, by: second) {
                     Log.transcription.notice("Echo suspicion cleared — every word was corroborated by the second engine")
-                    return VoiceFlowCore.TranscriptionResult(text: text)
+                    return VoiceFlowCore.TranscriptionResult(
+                        text: text, engineName: "whisper",
+                        decodeSeconds: decodeSeconds, arbiterSeconds: echoArbiterSeconds)
                 }
                 Log.transcription.notice("Arbiter transcript used in place of the echoed decode")
-                return VoiceFlowCore.TranscriptionResult(text: second)
+                return VoiceFlowCore.TranscriptionResult(
+                    text: second, engineName: "apple",
+                    decodeSeconds: decodeSeconds, arbiterSeconds: echoArbiterSeconds)
             case .silence, .unavailable:
                 // Silence ⇒ there was nothing to hear anyway. Unavailable ⇒ we
                 // cannot verify, and a contaminated transcript must not be
@@ -260,7 +268,9 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
             Log.transcription.notice("Whisper phantom candidate \"\(text, privacy: .public)\" (dur=\(clipSeconds, privacy: .public)s logProb=\(minLogProb ?? 0, privacy: .public) maxRMS=\(maxChunkRMS, privacy: .public)) — asking arbiter")
             var arbiterUnavailable = silenceArbiter == nil
             if silenceArbiter != nil {
-                switch try await consultArbiter(audio, languageCode: languageCode, context: context) {
+                let (phantomVerdict, phantomArbiterSeconds) = try await consultArbiterTimed(
+                    audio, languageCode: languageCode, context: context)
+                switch phantomVerdict {
                 case .heard(let second):
                     Log.transcription.notice("Arbiter heard speech — delivering Whisper text")
                     // The second opinion is already paid for; let it fix a name.
@@ -268,7 +278,9 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
                     // We still own the original capture (the arbiter only ever saw
                     // a copy), and this is the success path, so consume it here.
                     try? FileManager.default.removeItem(at: url)
-                    return VoiceFlowCore.TranscriptionResult(text: merged)
+                    return VoiceFlowCore.TranscriptionResult(
+                        text: merged, engineName: "whisper",
+                        decodeSeconds: decodeSeconds, arbiterSeconds: phantomArbiterSeconds)
                 case .silence:
                     // The one verdict that means "silence": discard the phantom.
                     Log.transcription.notice("Arbiter heard nothing — phantom discarded")
@@ -309,10 +321,14 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
             // Whisper's doesn't. Bounded on purpose: no near-miss, no second run,
             // so the ordinary dictation pays nothing.
             Log.transcription.notice("Vocabulary near-miss in Whisper output — asking the second engine")
-            if case .heard(let second) = try await consultArbiter(audio, languageCode: languageCode, context: context) {
+            let (voteVerdict, voteArbiterSeconds) = try await consultArbiterTimed(
+                audio, languageCode: languageCode, context: context)
+            if case .heard(let second) = voteVerdict {
                 let merged = vote(primary: text, secondary: second, context: context)
                 try? FileManager.default.removeItem(at: url)
-                return VoiceFlowCore.TranscriptionResult(text: merged)
+                return VoiceFlowCore.TranscriptionResult(
+                    text: merged, engineName: "whisper",
+                    decodeSeconds: decodeSeconds, arbiterSeconds: voteArbiterSeconds)
             }
             // Silence or unavailable: a near-miss is not a phantom signal, so the
             // Whisper text stands exactly as decoded.
@@ -321,7 +337,18 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         // the file alone — the FallbackTranscriber re-runs the Apple engine, which
         // reads the same file via its internal URL.
         try? FileManager.default.removeItem(at: url)
-        return VoiceFlowCore.TranscriptionResult(text: text)
+        return VoiceFlowCore.TranscriptionResult(
+            text: text, engineName: "whisper", decodeSeconds: decodeSeconds)
+    }
+
+    /// `consultArbiter` plus a stopwatch, so every call site reports how much the
+    /// second opinion actually cost — the variable expense the latency data needs.
+    private func consultArbiterTimed(
+        _ audio: AudioCapture, languageCode: String, context: VoiceFlowCore.TranscriptionContext
+    ) async throws -> (ArbiterVerdict, Double) {
+        let started = Date()
+        let verdict = try await consultArbiter(audio, languageCode: languageCode, context: context)
+        return (verdict, Date().timeIntervalSince(started))
     }
 
     /// What the second engine made of the same recording.

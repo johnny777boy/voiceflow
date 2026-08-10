@@ -32,7 +32,11 @@ public final class SQLiteHistoryStore: HistoryStoring, @unchecked Sendable {
             errorMessage TEXT,
             createdAt REAL NOT NULL,
             insertLatencySeconds REAL NOT NULL DEFAULT 0,
-            editedAfterInsert INTEGER NOT NULL DEFAULT 0
+            editedAfterInsert INTEGER NOT NULL DEFAULT 0,
+            transcribeSeconds REAL NOT NULL DEFAULT 0,
+            arbiterSeconds REAL NOT NULL DEFAULT 0,
+            cleanupSeconds REAL NOT NULL DEFAULT 0,
+            engineUsed TEXT
         );
         """)
         try execute("CREATE INDEX IF NOT EXISTS idx_transcripts_createdAt ON transcripts(createdAt DESC);")
@@ -48,6 +52,10 @@ public final class SQLiteHistoryStore: HistoryStoring, @unchecked Sendable {
         for column in [
             "insertLatencySeconds REAL NOT NULL DEFAULT 0",
             "editedAfterInsert INTEGER NOT NULL DEFAULT 0",
+            "transcribeSeconds REAL NOT NULL DEFAULT 0",
+            "arbiterSeconds REAL NOT NULL DEFAULT 0",
+            "cleanupSeconds REAL NOT NULL DEFAULT 0",
+            "engineUsed TEXT",
         ] {
             try? execute("ALTER TABLE transcripts ADD COLUMN \(column);")
         }
@@ -62,8 +70,9 @@ public final class SQLiteHistoryStore: HistoryStoring, @unchecked Sendable {
         let sql = """
         INSERT OR REPLACE INTO transcripts
         (id, rawText, cleanText, appBundleIdentifier, appName, mode, insertionStrategy, latencySeconds,
-         errorMessage, createdAt, insertLatencySeconds, editedAfterInsert)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?);
+         errorMessage, createdAt, insertLatencySeconds, editedAfterInsert,
+         transcribeSeconds, arbiterSeconds, cleanupSeconds, engineUsed)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);
         """
         let stmt = try prepare(sql)
         defer { sqlite3_finalize(stmt) }
@@ -79,6 +88,10 @@ public final class SQLiteHistoryStore: HistoryStoring, @unchecked Sendable {
         sqlite3_bind_double(stmt, 10, record.createdAt.timeIntervalSince1970)
         sqlite3_bind_double(stmt, 11, record.insertLatencySeconds)
         sqlite3_bind_int(stmt, 12, record.editedAfterInsert ? 1 : 0)
+        sqlite3_bind_double(stmt, 13, record.transcribeSeconds)
+        sqlite3_bind_double(stmt, 14, record.arbiterSeconds)
+        sqlite3_bind_double(stmt, 15, record.cleanupSeconds)
+        bindText(stmt, 16, record.engineUsed)
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw VoiceFlowError.historyUnavailable("save failed: \(lastErrorMessage())")
         }
@@ -152,10 +165,16 @@ public final class SQLiteHistoryStore: HistoryStoring, @unchecked Sendable {
         let columns = sqlite3_column_count(stmt)
         let insertLatency = columns > 10 ? sqlite3_column_double(stmt, 10) : 0
         let edited = columns > 11 ? sqlite3_column_int(stmt, 11) != 0 : false
+        let transcribe = columns > 12 ? sqlite3_column_double(stmt, 12) : 0
+        let arbiter = columns > 13 ? sqlite3_column_double(stmt, 13) : 0
+        let cleanup = columns > 14 ? sqlite3_column_double(stmt, 14) : 0
+        let engine = columns > 15 ? columnText(stmt, 15) : nil
         return TranscriptRecord(
             id: id, rawText: raw, cleanText: clean, appBundleIdentifier: bundle, appName: appName,
             mode: mode, insertionStrategy: strategy, latencySeconds: latency,
             insertLatencySeconds: insertLatency, editedAfterInsert: edited,
+            transcribeSeconds: transcribe, arbiterSeconds: arbiter,
+            cleanupSeconds: cleanup, engineUsed: engine,
             errorMessage: error, createdAt: created)
     }
 

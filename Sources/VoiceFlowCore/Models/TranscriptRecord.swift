@@ -24,6 +24,18 @@ public struct TranscriptRecord: Codable, Sendable, Equatable, Hashable, Identifi
     /// Set later by the correction watcher when the user edited the inserted text
     /// (Phase 4). Drives the zero-edit rate — the honest quality number.
     public var editedAfterInsert: Bool
+    /// Per-stage breakdown of `insertLatencySeconds`, so slow dictations are
+    /// attributable instead of mysterious. 0 = not measured (old records).
+    /// Seconds inside the transcriber call (Whisper/Apple decode + any arbiter).
+    public var transcribeSeconds: Double
+    /// Seconds inside the second-opinion engine, when one ran (subset of
+    /// `transcribeSeconds`). The variable cost that makes same-length dictations
+    /// differ by seconds.
+    public var arbiterSeconds: Double
+    /// Seconds inside the cleanup pipeline (rules + optional LLM polish).
+    public var cleanupSeconds: Double
+    /// Which engine produced the text ("whisper" / "apple"), when known.
+    public var engineUsed: String?
     /// A non-fatal error/warning message, if the event degraded (e.g. fell back to copy-only).
     public var errorMessage: String?
     /// When the dictation happened.
@@ -40,6 +52,10 @@ public struct TranscriptRecord: Codable, Sendable, Equatable, Hashable, Identifi
         latencySeconds: Double = 0,
         insertLatencySeconds: Double = 0,
         editedAfterInsert: Bool = false,
+        transcribeSeconds: Double = 0,
+        arbiterSeconds: Double = 0,
+        cleanupSeconds: Double = 0,
+        engineUsed: String? = nil,
         errorMessage: String? = nil,
         createdAt: Date = Date()
     ) {
@@ -53,6 +69,10 @@ public struct TranscriptRecord: Codable, Sendable, Equatable, Hashable, Identifi
         self.latencySeconds = latencySeconds
         self.insertLatencySeconds = insertLatencySeconds
         self.editedAfterInsert = editedAfterInsert
+        self.transcribeSeconds = transcribeSeconds
+        self.arbiterSeconds = arbiterSeconds
+        self.cleanupSeconds = cleanupSeconds
+        self.engineUsed = engineUsed
         self.errorMessage = errorMessage
         self.createdAt = createdAt
     }
@@ -71,6 +91,10 @@ public struct TranscriptRecord: Codable, Sendable, Equatable, Hashable, Identifi
         latencySeconds = try c.decodeIfPresent(Double.self, forKey: .latencySeconds) ?? 0
         insertLatencySeconds = try c.decodeIfPresent(Double.self, forKey: .insertLatencySeconds) ?? 0
         editedAfterInsert = try c.decodeIfPresent(Bool.self, forKey: .editedAfterInsert) ?? false
+        transcribeSeconds = try c.decodeIfPresent(Double.self, forKey: .transcribeSeconds) ?? 0
+        arbiterSeconds = try c.decodeIfPresent(Double.self, forKey: .arbiterSeconds) ?? 0
+        cleanupSeconds = try c.decodeIfPresent(Double.self, forKey: .cleanupSeconds) ?? 0
+        engineUsed = try c.decodeIfPresent(String.self, forKey: .engineUsed)
         errorMessage = try c.decodeIfPresent(String.self, forKey: .errorMessage)
         createdAt = try c.decode(Date.self, forKey: .createdAt)
     }

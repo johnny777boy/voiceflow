@@ -206,9 +206,11 @@ public actor DictationController {
 
         // Transcribe, biased toward the user's vocabulary + the names on screen.
         let recognitionContext = await makeTranscriptionContext()
+        let transcribeStarted = time.now()
         let transcription = try await transcriber.transcribe(
             capture, languageCode: settings.languageCode, context: recognitionContext
         )
+        let transcribeSeconds = max(0, time.now() - transcribeStarted)
         let raw = transcription.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else {
             throw VoiceFlowError.emptyTranscript
@@ -230,9 +232,11 @@ public actor DictationController {
         // place once the LLM polish arrives. When it's off, this is the original
         // single insertion of the fully-cleaned text.
         let twoPhase = settings.twoPhaseDeliveryEnabled && mode != .raw && settings.cleanupStrength != .off
+        let cleanupStarted = time.now()
         let firstPass = twoPhase
             ? try await cleanup.deterministicClean(raw, context: context)
             : try await cleanup.clean(raw, context: context)
+        let cleanupSeconds = max(0, time.now() - cleanupStarted)
 
         // Re-verify destination immediately before insertion.
         let current = activeApp.captureSnapshot()
@@ -265,7 +269,10 @@ public actor DictationController {
         let completedAt = time.now()
         let latency = max(0, completedAt - recordStartTime)
         let insertLatency = max(0, completedAt - releasedAt)
-        Log.transcription.notice("Dictation delivered in \(insertLatency, privacy: .public)s after release (\(latency, privacy: .public)s including hold)")
+        // The itemized bill for this dictation. This line is the whole point of
+        // the instrumentation: when a dictation feels slow, the answer is here.
+        let arbiterSeconds = transcription.arbiterSeconds ?? 0
+        Log.transcription.notice("Dictation delivered in \(insertLatency, privacy: .public)s after release — transcribe \(transcribeSeconds, privacy: .public)s (engine \(transcription.engineName ?? "?", privacy: .public), arbiter \(arbiterSeconds, privacy: .public)s), cleanup \(cleanupSeconds, privacy: .public)s")
         let record = TranscriptRecord(
             rawText: raw,
             cleanText: clean,
@@ -275,6 +282,10 @@ public actor DictationController {
             insertionStrategy: outcome.strategy,
             latencySeconds: latency,
             insertLatencySeconds: insertLatency,
+            transcribeSeconds: transcribeSeconds,
+            arbiterSeconds: arbiterSeconds,
+            cleanupSeconds: cleanupSeconds,
+            engineUsed: transcription.engineName,
             errorMessage: outcome.note ?? plan.note,
             createdAt: time.date()
         )
