@@ -70,6 +70,12 @@ final class CorrectionWatcher {
             // the element may be gone or reused for something else entirely.
             guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == bundleID else { return }
             guard let after = AX.string(element, kAXValueAttribute) else { return }
+            // An emptied field means the user SENT or cleared the message before
+            // the window closed — the most common outcome of a good dictation.
+            // It says nothing about our accuracy, so it must count as neither an
+            // edit nor a correction; treating it as "edited" made the zero-edit
+            // rate punish every quick Enter press.
+            guard !after.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
             self.evaluate(recordID: recordID, insertedText: insertedText, before: before, after: after)
         }
     }
