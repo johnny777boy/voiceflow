@@ -10,6 +10,20 @@ Codex PASS first try. Tags: `verified-2026-08-10-mic-idle` (current) ·
 `pre-mic-idle-merge-2026-08-10` (rollback). 178 tests. App rebuilt from main and
 installed. Both feature branches deleted; main is the only branch.
 
+## ⚖️ STANDING RULE (Yoni, 2026-08-10): speed may NEVER cost quality
+
+Explicit instruction: "we don't want to lose or compromise the current quality
+under no circumstances." Every latency change is therefore gated on proof of
+accuracy parity, not vibes:
+- No model downgrade, trigger-narrowing, or pipeline cut merges without a WER
+  A/B on Yoni's voice (Scripts/wer.py, docs/ACCURACY_BENCHMARK.md protocol)
+  showing no regression, plus the zero-edit rate holding in daily use.
+- The safety machinery (phantom arbiter, unconditional echo defense, strict
+  CleanupGuard, verbatim rules) is not a latency budget. Cuts come from waste
+  (redundant work, over-broad triggers, dead time), never from checks.
+- If a speed option's accuracy cost is unknown, it ships OFF by default behind a
+  setting until measured — like two-phase delivery today.
+
 ## ⏱️ NEXT UP — latency instrumentation (the standing complaint)
 
 Yoni's verdict on the whole run: accuracy/trust good, "it's not that fast" —
