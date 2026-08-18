@@ -139,9 +139,19 @@ final class WhisperModelManager: ObservableObject {
             state = .preparing
             // prewarm keeps peak memory down during first-time Core ML
             // specialization; download:false guarantees no surprise network I/O.
+            // BOTH bases must point at App Support. The model folder alone is
+            // not enough: WhisperKit resolves its TOKENIZER through
+            // `tokenizerFolder ?? downloadBase`, and with neither set it falls
+            // back to the library default — ~/Documents/huggingface — which is
+            // TCC-protected for a background app. That read can stall without
+            // throwing, leaving the load stuck in .preparing forever with no
+            // error: the user dictates for days on the fallback engine without
+            // being told (lived defect, 2026-08-10 → 2026-08-18).
             let config = WhisperKitConfig(
                 model: Self.modelVariant,
+                downloadBase: Self.downloadBase(),
                 modelFolder: folder.path,
+                tokenizerFolder: Self.downloadBase(),
                 prewarm: true,
                 load: true,
                 download: false
