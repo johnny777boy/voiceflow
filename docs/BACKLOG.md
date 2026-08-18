@@ -10,6 +10,37 @@ Codex PASS first try. Tags: `verified-2026-08-10-mic-idle` (current) ·
 `pre-mic-idle-merge-2026-08-10` (rollback). 178 tests. App rebuilt from main and
 installed. Both feature branches deleted; main is the only branch.
 
+## 🚨 2026-08-18 SESSION — the silent-engine defect, found and fixed (branch, unmerged)
+
+The instrumentation branch's first week of data exposed the worst kind of bug:
+**High Accuracy was on, the model was on disk, and every dictation for 8+ days
+ran on the Apple engine.** No error anywhere. Root cause chain, proven by live
+A/B with Yoni dictating:
+
+1. (Latent, fixed) The LOAD-time WhisperKitConfig omitted downloadBase/
+   tokenizerFolder, so the tokenizer resolved to TCC-protected ~/Documents.
+   Files copied into App Support; config now pins both.
+2. (The killer, HOTFIXED) Feeding promptTokens makes WhisperKit 0.18 decode
+   EVERY clip to zero characters → emptyTranscript → silent Apple fallback.
+   Prompt off ⇒ Whisper transcribes normally (0.5-0.6s decode!). Biasing is
+   DISABLED behind dev switch `whisperPromptBiasingEnabled` (ships false); the
+   echo defense is gated on a prompt actually being fed. ROOT CAUSE INSIDE
+   WHISPERKIT STILL OPEN — re-enable only with the fix + WER proof.
+3. (Prevention, built) 180s load watchdog (stuck .preparing → visible .failed
+   with Retry; generation-bumped so zombie completions are discarded) +
+   EngineHealthBanner in the MAIN window whenever enabled && !ready.
+
+Also this session: full audit (insertion 213/213 clean, 96% unedited, usage had
+collapsed during the silent-degradation week — it tracks accuracy trust);
+per-stage data shows the real bill is decode ~0.65s + LLM cleanup ~1.2s
+(cleanup is now the latency target, arbiter ≈ 0); emptied-field fix (sending
+before the 6s window is neither an edit nor a correction).
+
+**Ritual in progress on this branch:** reviewers running → fix findings →
+CODEX-BRIEF → Yoni's PASS → merge. Then: cleanup-latency package (two-phase
+live test) → biasing root-cause + WER harness → learning-dictionary redesign
+(0 suggestions in 224 dictations — the 6s window doesn't match his behavior).
+
 ## ⚖️ STANDING RULE (Yoni, 2026-08-10): speed may NEVER cost quality
 
 Explicit instruction: "we don't want to lose or compromise the current quality
