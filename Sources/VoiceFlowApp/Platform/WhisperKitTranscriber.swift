@@ -183,10 +183,23 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         // startOfPreviousToken, filtered below specialTokenBegin, and the prefill
         // KV-cache is bypassed whenever promptTokens is set — the PR #514
         // behavior this feature depends on.
-        if let tokenizer = wk.tokenizer,
+        // DISABLED (2026-08-18, lived defect): feeding promptTokens silenced the
+        // decoder COMPLETELY — every dictation decoded to zero characters and
+        // fell back to the Apple engine, for over a week, with no visible error.
+        // Proven live by A/B: prompt off ⇒ Whisper transcribes normally; prompt
+        // on ⇒ 0 chars, every time. Root cause in WhisperKit 0.18's prompt
+        // handling is still to be isolated (see BACKLOG); until it is fixed and
+        // WER-verified, no prompt is fed. Whisper without biasing beats Apple
+        // with it — the accuracy floor comes first.
+        // Dev switch (`defaults write com.voiceflow.dictation whisperPromptBiasingEnabled -bool YES`)
+        // so the eventual fix can be A/B-tested live without a rebuild. Ships false.
+        var promptWasFed = false
+        if UserDefaults.standard.bool(forKey: "whisperPromptBiasingEnabled"),
+           let tokenizer = wk.tokenizer,
            let prompt = Self.promptTokens(for: context, tokenizer: tokenizer) {
             options.promptTokens = prompt
             options.usePrefillPrompt = true
+            promptWasFed = true
             // Terms come from the user's screen: count in the clear, contents private.
             Log.transcription.notice("Whisper context bias: \(context.orderedTerms.count, privacy: .public) terms, \(prompt.count, privacy: .public) tokens — \(context.promptText(), privacy: .private)")
         }
@@ -228,7 +241,11 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         // "short clip, few words" test below would never catch it. Delivering it
         // would both insert words the user never said and paste what was on their
         // screen into whatever they're typing.
-        if TranscriptSanity.looksLikePromptEcho(text: text, promptTerms: context.orderedTerms) {
+        // The echo defense guards against the decoder reading the PROMPT back;
+        // with no prompt fed there is nothing to echo, and running the check
+        // anyway would spend an arbiter run on every vocabulary-dense sentence
+        // for no protection. Re-enable together with the prompt.
+        if promptWasFed, TranscriptSanity.looksLikePromptEcho(text: text, promptTerms: context.orderedTerms) {
             Log.transcription.error("Whisper echoed the context prompt — discarding the decode")
             let (echoVerdict, echoArbiterSeconds) = try await consultArbiterTimed(
                 audio, languageCode: languageCode, context: context)
