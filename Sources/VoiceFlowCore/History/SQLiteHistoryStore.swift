@@ -146,6 +146,40 @@ public final class SQLiteHistoryStore: HistoryStoring, @unchecked Sendable {
         }
     }
 
+    // MARK: - Targeted field updates
+
+    /// Single-statement UPDATEs, NOT the protocol's read-modify-write default.
+    ///
+    /// The default reads the whole record and REPLACEs it, taking the store lock
+    /// twice with a gap in between. Two writers legitimately race there: the
+    /// correction watcher setting `editedAfterInsert` ~6s after insertion, and
+    /// two-phase delivery writing the refined `cleanText` when a cold LLM takes
+    /// longer than that. Whichever wrote first loses its field to the other's
+    /// stale copy — silently corrupting either the zero-edit metric or the
+    /// delivered text. One statement per field, each atomic under the lock,
+    /// removes the window entirely and leaves every other column untouched.
+    public func setEditedAfterInsert(_ edited: Bool, id: UUID) throws {
+        lock.lock(); defer { lock.unlock() }
+        let stmt = try prepare("UPDATE transcripts SET editedAfterInsert = ? WHERE id = ?;")
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int(stmt, 1, edited ? 1 : 0)
+        bindText(stmt, 2, id.uuidString)
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw VoiceFlowError.historyUnavailable("setEditedAfterInsert failed: \(lastErrorMessage())")
+        }
+    }
+
+    public func updateCleanText(_ text: String, id: UUID) throws {
+        lock.lock(); defer { lock.unlock() }
+        let stmt = try prepare("UPDATE transcripts SET cleanText = ? WHERE id = ?;")
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, text)
+        bindText(stmt, 2, id.uuidString)
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw VoiceFlowError.historyUnavailable("updateCleanText failed: \(lastErrorMessage())")
+        }
+    }
+
     // MARK: - Row mapping
 
     /// Column order matches the CREATE TABLE definition.

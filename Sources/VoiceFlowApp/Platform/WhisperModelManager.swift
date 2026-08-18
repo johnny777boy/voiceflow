@@ -71,6 +71,11 @@ final class WhisperModelManager: ObservableObject {
 
     func retry() {
         guard Self.isEnabled else { state = .idle; return }
+        // An explicit retry is the user accepting the cost of a fresh attempt
+        // even if a watchdog-orphaned load is still running, so the handle is
+        // dropped here (and only here) to let `ensureReady` proceed.
+        task?.cancel()
+        task = nil
         state = .idle
         ensureReady()
     }
@@ -95,7 +100,13 @@ final class WhisperModelManager: ObservableObject {
             guard let self, self.generation == gen else { return }
             self.task = nil
         }
-        watchLoadPhase(generation: gen)
+        // NO watchdog armed here — deliberately. `run()` arms one the moment it
+        // actually enters the load phase, on BOTH the cached and the downloaded
+        // path. An arm here would start its clock at t=0 and then fire mid-LOAD:
+        // a download finishing at t=170 would leave the (legitimately
+        // minutes-long) first-time Core ML specialization just 10 seconds before
+        // being declared stuck — deterministically killing healthy first loads on
+        // fast connections. Both reviewers caught this independently.
     }
 
     /// Watchdog for the LOAD phase. A model load that neither finishes nor
@@ -107,12 +118,23 @@ final class WhisperModelManager: ObservableObject {
     /// it also reports progress). The stuck load itself cannot be cancelled —
     /// bumping the generation orphans it, so a late completion is discarded by
     /// the existing `isCurrent` guards instead of resurrecting a zombie run.
+    ///
+    /// MUST be armed only at the moment the load phase actually begins, never
+    /// earlier: the guard is `(generation, state)` with no phase token, so a
+    /// watchdog armed before the download cannot tell a 10-second-old load from
+    /// a 180-second-old one.
     private func watchLoadPhase(generation gen: UInt64, timeout: TimeInterval = 180) {
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
             guard let self, self.generation == gen, self.state == .preparing else { return }
             self.generation &+= 1
-            self.task = nil
+            // `task` is deliberately NOT cleared: the orphaned load is still
+            // specializing 1.5 GB of Core ML and cannot be cancelled. Leaving the
+            // handle in place makes `ensureReady`'s `task == nil` guard refuse a
+            // second concurrent load, so Retry can't double peak memory while the
+            // zombie finishes. The zombie clears the handle itself on completion
+            // (its `generation == gen` check fails, so it no-ops) — see retry(),
+            // which drops the handle explicitly for the deliberate case.
             Log.transcription.error("Whisper load watchdog fired after \(Int(timeout), privacy: .public)s — marking failed")
             self.state = .failed("Model load timed out. Dictation continues on the standard engine — use Retry, or toggle High Accuracy off and on.")
         }
@@ -158,10 +180,9 @@ final class WhisperModelManager: ObservableObject {
             guard isCurrent(gen) else { return }
             try Task.checkCancellation()
             state = .preparing
-            // Re-arm the watchdog for the load phase proper: the one scheduled at
-            // ensureReady only guards a load that began there — after a long
-            // download it would have fired mid-download, seen `.downloading`,
-            // and stood down for good.
+            // THE arming point for the load watchdog — reached by both the
+            // cached-folder path and the post-download path, and only once the
+            // load is genuinely starting, so its full budget measures the load.
             watchLoadPhase(generation: gen)
             // prewarm keeps peak memory down during first-time Core ML
             // specialization; download:false guarantees no surprise network I/O.

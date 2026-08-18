@@ -206,7 +206,7 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
 
         let decodeStarted = Date()
         let results = try await wk.transcribe(audioArray: samples, decodeOptions: options)
-        let decodeSeconds = Date().timeIntervalSince(decodeStarted)
+        let decodeSeconds = max(0, Date().timeIntervalSince(decodeStarted))
         let text = results.map { $0.text }.joined(separator: " ")
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -365,7 +365,9 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
     ) async throws -> (ArbiterVerdict, Double) {
         let started = Date()
         let verdict = try await consultArbiter(audio, languageCode: languageCode, context: context)
-        return (verdict, Date().timeIntervalSince(started))
+        // Clamped: a backward wall-clock step (NTP) must never persist a
+        // negative duration into history.
+        return (verdict, max(0, Date().timeIntervalSince(started)))
     }
 
     /// What the second engine made of the same recording.

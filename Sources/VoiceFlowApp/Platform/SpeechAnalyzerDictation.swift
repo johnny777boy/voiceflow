@@ -386,7 +386,7 @@ final class SpeechAnalyzerDictation: SpeechEngine, @unchecked Sendable {
         guard !trimmed.isEmpty else { throw VoiceFlowError.emptyTranscript }
         return TranscriptionResult(
             text: trimmed, engineName: "apple",
-            decodeSeconds: Date().timeIntervalSince(decodeStarted))
+            decodeSeconds: max(0, Date().timeIntervalSince(decodeStarted)))
     }
 
     // MARK: - Model asset

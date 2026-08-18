@@ -114,6 +114,63 @@ func runMetricsTests(_ suite: TestSuite) {
         s.expect(record.insertLatencySeconds >= 2.5, "stages missing from the total")
     }
 
+    suite.test("stages: a REAL pre-instrumentation database migrates and reads correctly") { s in
+        // The other round-trip test writes zeros into a NEW-schema DB, which never
+        // exercises the thing the positional-column rule exists to protect. This
+        // builds the actual 12-column schema an installed build created, inserts a
+        // row through it, then opens it with the current store — the upgrade path
+        // a real user takes.
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("vf-migrate-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("history.sqlite")
+        let id = UUID()
+        let oldSchema = """
+        CREATE TABLE transcripts (
+            id TEXT PRIMARY KEY, rawText TEXT NOT NULL, cleanText TEXT NOT NULL,
+            appBundleIdentifier TEXT, appName TEXT, mode TEXT NOT NULL,
+            insertionStrategy TEXT, latencySeconds REAL NOT NULL, errorMessage TEXT,
+            createdAt REAL NOT NULL, insertLatencySeconds REAL NOT NULL DEFAULT 0,
+            editedAfterInsert INTEGER NOT NULL DEFAULT 0);
+        INSERT INTO transcripts VALUES
+            ('\(id.uuidString)','heard it','Heard it.',NULL,NULL,'cleanWriting',
+             NULL,3.5,NULL,\(Date().timeIntervalSince1970),1.25,0);
+        """
+        let sqlite = Process()
+        sqlite.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        sqlite.arguments = [url.path, oldSchema]
+        try? sqlite.run()
+        sqlite.waitUntilExit()
+        guard sqlite.terminationStatus == 0 else {
+            s.expect(false, "could not build the legacy database fixture")
+            return
+        }
+        do {
+            let store = try SQLiteHistoryStore(url: url)   // runs migrate()
+            let migrated = try store.record(id: id)
+            // Pre-existing columns survive the upgrade intact...
+            s.expectEqual(migrated?.cleanText, "Heard it.")
+            s.expectEqual(migrated?.insertLatencySeconds, 1.25)
+            s.expectEqual(migrated?.latencySeconds, 3.5)
+            // ...and the appended ones read as defaults, not as garbage from a
+            // shifted column position.
+            s.expectEqual(migrated?.transcribeSeconds, 0)
+            s.expectEqual(migrated?.arbiterSeconds, 0)
+            s.expectEqual(migrated?.cleanupSeconds, 0)
+            s.expectEqual(migrated?.engineUsed, nil)
+            // The atomic field updates must hit the migrated row too.
+            try store.setEditedAfterInsert(true, id: id)
+            try store.updateCleanText("Heard it, refined.", id: id)
+            let updated = try store.record(id: id)
+            s.expectEqual(updated?.editedAfterInsert, true)
+            s.expectEqual(updated?.cleanText, "Heard it, refined.")
+            s.expectEqual(updated?.insertLatencySeconds, 1.25, "a targeted update clobbered another column")
+        } catch {
+            s.expect(false, "migration failed: \(error)")
+        }
+    }
+
     suite.test("stages: survive a SQLite round-trip and old rows read as zero") { s in
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("vf-stage-test-\(UUID().uuidString)")
