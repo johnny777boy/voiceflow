@@ -18,6 +18,11 @@ struct HomeView: View {
                 || !coordinator.accessibilityGranted || !coordinator.inputMonitoringGranted {
                 permissionBanner
             }
+            // The engine-honesty banner. High Accuracy silently not running cost
+            // the user 8 days of degraded transcription with no indication
+            // anywhere — the app must SAY when the engine he chose isn't the
+            // engine he's getting, in the window he actually looks at.
+            EngineHealthBanner(manager: coordinator.whisperManager)
             talkButton
             statusBlock
             modePicker
@@ -223,6 +228,46 @@ struct HomeView: View {
                                 Color(red: 0.36, green: 0.42, blue: 0.98).opacity(0.06)],
                        startPoint: .top, endPoint: .bottom)
         .ignoresSafeArea()
+    }
+}
+
+/// Shown ONLY when High Accuracy is enabled but dictations are actually being
+/// served by the fallback engine — downloading, still loading, or failed. Ready
+/// or toggle-off renders nothing. This is the honesty fix for the silent
+/// engine-downgrade defect: the state was always available in Settings, but
+/// nobody opens Settings to discover a problem they don't know they have.
+private struct EngineHealthBanner: View {
+    @ObservedObject var manager: WhisperModelManager
+    @AppStorage(WhisperModelManager.enabledDefaultsKey) private var enabled = false
+
+    var body: some View {
+        if enabled, let text = notice {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text(text).font(.caption)
+                Spacer()
+                if case .failed = manager.state {
+                    Button("Retry") { manager.retry() }.font(.caption)
+                }
+            }
+            .padding(8)
+            .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    private var notice: String? {
+        switch manager.state {
+        case .ready: return nil
+        case .downloading(let f):
+            return "High Accuracy model downloading (\(Int(f * 100))%) — dictating on the standard engine until it's ready."
+        case .preparing:
+            return "High Accuracy model is loading — dictating on the standard engine until it's ready."
+        case .failed(let message):
+            return "High Accuracy is NOT running — dictations use the standard engine. \(message)"
+        case .idle:
+            return "High Accuracy is on but the engine hasn't started — dictations use the standard engine."
+        }
     }
 }
 

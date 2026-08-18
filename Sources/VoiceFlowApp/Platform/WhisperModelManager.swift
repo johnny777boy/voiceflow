@@ -95,6 +95,27 @@ final class WhisperModelManager: ObservableObject {
             guard let self, self.generation == gen else { return }
             self.task = nil
         }
+        watchLoadPhase(generation: gen)
+    }
+
+    /// Watchdog for the LOAD phase. A model load that neither finishes nor
+    /// throws — a stalled file read once held it in `.preparing` for over a
+    /// week — must become a visible failure, never a silent one: the router
+    /// keeps serving the fallback engine while the UI claims High Accuracy is
+    /// coming, and the user's accuracy quietly degrades with no error anywhere.
+    /// Downloading is exempt (a 1.5 GB download may legitimately take longer;
+    /// it also reports progress). The stuck load itself cannot be cancelled —
+    /// bumping the generation orphans it, so a late completion is discarded by
+    /// the existing `isCurrent` guards instead of resurrecting a zombie run.
+    private func watchLoadPhase(generation gen: UInt64, timeout: TimeInterval = 180) {
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+            guard let self, self.generation == gen, self.state == .preparing else { return }
+            self.generation &+= 1
+            self.task = nil
+            Log.transcription.error("Whisper load watchdog fired after \(Int(timeout), privacy: .public)s — marking failed")
+            self.state = .failed("Model load timed out. Dictation continues on the standard engine — use Retry, or toggle High Accuracy off and on.")
+        }
     }
 
     /// True while `gen` is still the live run AND the feature is still on.
@@ -137,6 +158,11 @@ final class WhisperModelManager: ObservableObject {
             guard isCurrent(gen) else { return }
             try Task.checkCancellation()
             state = .preparing
+            // Re-arm the watchdog for the load phase proper: the one scheduled at
+            // ensureReady only guards a load that began there — after a long
+            // download it would have fired mid-download, seen `.downloading`,
+            // and stood down for good.
+            watchLoadPhase(generation: gen)
             // prewarm keeps peak memory down during first-time Core ML
             // specialization; download:false guarantees no surprise network I/O.
             // BOTH bases must point at App Support. The model folder alone is
