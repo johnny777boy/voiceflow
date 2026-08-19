@@ -16,7 +16,10 @@ let package = Package(
     products: [
         .library(name: "VoiceFlowCore", targets: ["VoiceFlowCore"]),
         .executable(name: "VoiceFlow", targets: ["VoiceFlowApp"]),
-        .executable(name: "VoiceFlowTests", targets: ["VoiceFlowTests"])
+        .executable(name: "VoiceFlowTests", targets: ["VoiceFlowTests"]),
+        // Replays real dictations through the production cleanup path — the
+        // answer to "how do we know it is actually working?".
+        .executable(name: "VoiceFlowReplay", targets: ["VoiceFlowReplay"])
     ],
     dependencies: [
         // On-device Whisper (Core ML / Neural Engine) for the optional High-Accuracy mode.
@@ -40,6 +43,10 @@ let package = Package(
                 "VoiceFlowCore",
                 .product(name: "WhisperKit", package: "WhisperKit")
             ]
+        ),
+        .executableTarget(
+            name: "VoiceFlowReplay",
+            dependencies: ["VoiceFlowCore"]
         ),
         .executableTarget(
             name: "VoiceFlowTests",

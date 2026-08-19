@@ -1,6 +1,5 @@
 import Foundation
 import FoundationModels
-import VoiceFlowCore
 
 /// AI cleanup powered by Apple's **on-device Foundation Models** (Apple Intelligence,
 /// macOS 26). Fixes grammar, punctuation, and imperfect/non-native English locally —
@@ -9,28 +8,33 @@ import VoiceFlowCore
 ///
 /// If Apple Intelligence isn't available/enabled, it throws
 /// `cleanupProviderUnavailable` so the pipeline falls back to deterministic rules.
+/// LIVES IN CORE, NOT THE APP, DELIBERATELY (2026-08-19). While this sat in the
+/// executable target nothing could run it but the app itself — so "is the
+/// cleanup actually working?" had no answer except the owner's impression. It is
+/// here so `VoiceFlowReplay` can drive the EXACT production path over real
+/// transcripts. A harness that reimplements the thing it checks proves nothing.
 @available(macOS 26.0, *)
-final class FoundationModelsCleanupProvider: CleanupProviding, @unchecked Sendable {
+public final class FoundationModelsCleanupProvider: CleanupProviding, @unchecked Sendable {
 
-    static var isAvailable: Bool { SystemLanguageModel.default.isAvailable }
+    public static var isAvailable: Bool { SystemLanguageModel.default.isAvailable }
 
     /// Where the guard's verdict on this dictation is written (see CleanupAuditLog).
     private let audit: CleanupAuditLog?
 
-    init(audit: CleanupAuditLog? = nil) { self.audit = audit }
+    public init(audit: CleanupAuditLog? = nil) { self.audit = audit }
 
     /// Load the model's weights while the user is still talking, so the LLM pass
     /// starts warm instead of paying a cold start on the first dictation of a
     /// session. A NEW session is still created per dictation — reusing one would
     /// accumulate transcript history and let earlier dictations bleed into later
     /// cleanups, which is exactly the drift the verbatim guard exists to stop.
-    func prewarm() {
+    public func prewarm() {
         guard SystemLanguageModel.default.isAvailable else { return }
         let instructions = CleanupPromptBuilder.systemPrompt(for: .cleanWriting, strength: .standard)
         LanguageModelSession(instructions: instructions).prewarm()
     }
 
-    func clean(_ rawText: String, context: CleanupContext) async throws -> String {
+    public func clean(_ rawText: String, context: CleanupContext) async throws -> String {
         // DIAGNOSTIC LOGGING (2026-08-18): three very different failures used to
         // throw the same error and print one indistinguishable line ("AI cleanup
         // unavailable"), which hid WHY dictations were never being repaired.
