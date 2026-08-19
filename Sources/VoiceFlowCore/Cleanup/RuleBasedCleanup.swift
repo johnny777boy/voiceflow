@@ -13,6 +13,9 @@ public struct RuleBasedCleanup: CleanupProviding {
     /// Synchronous entry point (the engine does no async work; exposed for tests
     /// and for callers that want the deterministic result directly).
     public func cleanSync(_ rawText: String, context: CleanupContext) -> String {
+        // Stutters go before everything: deterministic, unit-tested, and never
+        // left to the model to guess at.
+        let rawText = TextNormalizer.collapseStutters(rawText)
         // Raw mode / cleanup-off are a TRUE verbatim path: whitespace tidy only.
         // Vocabulary substitution must NOT run here — it rewrites words the user
         // actually spoke ("postgres" → "PostgreSQL"), which corrupts both the

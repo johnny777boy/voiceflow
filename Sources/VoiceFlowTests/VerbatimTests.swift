@@ -320,4 +320,31 @@ func runVerbatimTests(_ s: TestSuite) {
             cleaned: "you owe you and I owe me", policy: .verbatim))
     }
 
+    s.test("stutters: repeated function words collapse, real repetition survives") { s in
+        s.expectEqual(TextNormalizer.collapseStutters("so many things the the stuff the the push step"),
+                      "so many things the stuff the push step")
+        s.expectEqual(TextNormalizer.collapseStutters("I I think we we should go"),
+                      "I think we should go")
+        // Open-class repetition is usually deliberate and is never touched.
+        s.expectEqual(TextNormalizer.collapseStutters("be very very careful there"),
+                      "be very very careful there")
+        s.expectEqual(TextNormalizer.collapseStutters("no no no do not do that"),
+                      "no no no do not do that")
+    }
+
+    s.test("fillers: the load-bearing words are NOT in the filler list") { s in
+        // Each of these was proposed as a filler and each is meaningful in his
+        // work: "dig a new well", "the framing is okay", "turn right",
+        // "he was seriously injured", "the beam is actually load bearing".
+        for word in ["well", "okay", "right", "left", "like", "actually",
+                     "seriously", "literally", "so", "yeah", "oh"] {
+            s.expectFalse(TextNormalizer.fillerWords.contains(word),
+                          "'\(word)' must not be deletable as a filler")
+        }
+        // Filled pauses, which are safe by definition, ARE covered.
+        for word in ["um", "uh", "erm", "hmm"] {
+            s.expect(TextNormalizer.fillerWords.contains(word))
+        }
+    }
+
 }

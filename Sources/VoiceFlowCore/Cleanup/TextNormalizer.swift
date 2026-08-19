@@ -16,9 +16,49 @@ public enum TextNormalizer {
     /// NOTE: "er", "err", and "ah" are deliberately NOT here — matching is
     /// case-insensitive, so they destroyed the real words "ER" (emergency room),
     /// "err" ("to err is human"), and the interjection "ah" ("ah, I see").
+    /// Filled pauses — the ONLY class of disfluency that is unconditionally safe
+    /// to delete, because it has no semantic content by definition. This matches
+    /// NIST SCTK's `%HESITATION` class and the filler list shipped by VoiceInk,
+    /// the leading open-source Mac competitor.
+    ///
+    /// Words like "like", "well", "okay", "right", "so", "actually" are NOT here
+    /// and must not be added. Research on the Switchboard corpus found human
+    /// annotators could not agree on them (κ 0.40–0.43), the stylebook abandoned
+    /// "actually" as unmarkable mid-project, and automatic detection of
+    /// discourse-"like" tops out near 79% precision — one deletion in five wrong.
+    /// In this user's work they are load-bearing: "dig a new WELL", "the framing
+    /// is OKAY", "he was SERIOUSLY injured", "turn RIGHT at the corner".
     public static let fillerWords: Set<String> = [
-        "um", "uh", "uhh", "umm", "uhm", "erm", "hmm", "mhm"
+        "um", "uh", "uhh", "umm", "uhm", "erm", "hmm", "mhm", "mmm"
     ]
+    // NOT added, and the existing suite proved why: "er" would eat the ER in
+    // "the ER doctor", and "mm" would eat the unit in "50 mm trim". Even the
+    // supposedly-safe class needs checking against what this user actually says.
+
+    /// Collapse a stutter: an immediately repeated CLOSED-CLASS word, "the the"
+    /// → "the". Restricted to function words on purpose — repeated open-class
+    /// words are usually deliberate ("very very careful", "no no no"), and this
+    /// runs before the model sees the text so it must never guess.
+    public static func collapseStutters(_ text: String) -> String {
+        let closedClass: Set<String> = [
+            "the", "a", "an", "and", "or", "but", "of", "to", "in", "for", "on",
+            "with", "at", "by", "from", "is", "are", "was", "were", "i", "you",
+            "he", "she", "it", "we", "they", "that", "this", "so", "my", "your",
+        ]
+        let tokens = text.split(separator: " ", omittingEmptySubsequences: false)
+        var out: [Substring] = []
+        for token in tokens {
+            let bare = token.lowercased().filter { $0.isLetter }
+            if let previous = out.last {
+                let previousBare = previous.lowercased().filter { $0.isLetter }
+                if !bare.isEmpty, bare == previousBare, closedClass.contains(bare) {
+                    continue   // drop the repeat, keep the first
+                }
+            }
+            out.append(token)
+        }
+        return out.joined(separator: " ")
+    }
 
     /// Collapse runs of whitespace to single spaces and trim ends. Newlines are
     /// preserved (collapsed to single `\n`).
