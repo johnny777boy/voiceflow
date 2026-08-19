@@ -42,6 +42,30 @@ Whisper large-v3 benchmarks ~7-8% WER; Apple's engine ~14%. If he lands near
 
 ### OPEN — highest value first
 
+### 2026-08-19 — "how do we know for a fact?" — three things now measured
+
+He asked the right question: unit tests cannot answer it, because the same
+person wrote the tests and the code. So `swift run VoiceFlowReplay` now drives
+the PRODUCTION cleanup path over dictations he actually spoke (the provider had
+to move from the app target into Core first — nothing but the app could run it).
+Cross-validated against the app's own live audit; both agree.
+
+1. **The guard is NOT the problem.** 0 rejections, live (6/6 accepted) and in
+   replay (8/8, 5/5). I predicted the opposite. Two independent paths agree.
+2. **The model is a light punctuation pass.** Capitalises, adds a comma or final
+   period, drops "uh" — and leaves 77-word run-ons. THE PROMPT IS WHY: at
+   `standard` it says "do NOT merge sentences" and "keep their sentence
+   structure", and never asks for sentence breaks.
+3. **`cleanupStrength` is inert.** standard vs aggressive over five real
+   run-ons: byte-identical output, 45→51 sentences, 86→77 longest, both times.
+
+**Refuted, do not re-litigate:** the guard is not eating the polish; the model
+does not degrade on long input (splitting a 76-word run-on cleaned no better and
+produced a wrong break, "we need to actually like. Go to the backlog").
+
+**Next:** change the prompt to segment run-ons, then prove it with the replay
+(sentences / longest before→after) AND confirm the guard still accepts.
+
 1. **THE AUDIT IS LIVE — use it.** Dictate normally for a few hours on the
    installed build, then:
    ```
