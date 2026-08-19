@@ -1,12 +1,18 @@
 # Codex Verification Brief — engine recovery + instrumentation → main merge
 
 Repo: github.com/johnny777boy/voiceflow
-Branch to verify: `feature/latency-instrumentation` (head `d50a787` — verify
+Branch to verify: `feature/latency-instrumentation` (head `bea6ce1` — verify
 whatever HEAD is when you start)
 Merge target: `main` (`9efd3cb`, tag `verified-2026-08-10-mic-idle`)
 Diff: `git diff main...HEAD -- Sources/`
 Build/test: `swift build` and `swift build -c release` (both 0 warnings) ·
-`swift run VoiceFlowTests` → "All 183 tests passed".
+`swift run VoiceFlowTests` → "All 207 tests passed".
+
+**ROUND 3.** Round 1 passed on capture ownership. Round 2 FAILED — reordering
+pronouns reversed a debt ("you owe me and I owe you" → "you owe you and I owe
+me") because the guard compared word SETS; fixed in `a8cbd06` with an
+order-aware LCS check, which you should re-attack. Everything in the section
+below landed AFTER round 2 and has had no external review at all.
 If your environment hits `sandbox-exec: sandbox_apply: Operation not permitted`,
 re-run with `--disable-sandbox` (environment restriction, not a project defect).
 
@@ -47,6 +53,69 @@ guard — a single disliked change discards every punctuation and grammar fix
 bundled with it. The diagnostics in `d50a787` exist to confirm that from live
 logs before any guard redesign is attempted. A per-edit guard is the intended
 follow-up, on its own branch, WER-gated.
+
+## NEW SINCE ROUND 2 — the cleanup-fidelity work (no external review yet)
+
+**`8b46384` + `7a470cb` — the model was REFUSING his dictations.** Handed a bare
+transcript, Apple's on-device model reads second-person speech as a message
+addressed to it and replies "I'm sorry, but I cannot help you with that" (3/3
+runs, measured on his Mac); another dictation made it emit a whole change-order
+letter. Fixed by delimiting the transcript (`<<<TRANSCRIPT … TRANSCRIPT>>>`) and
+instructing the model that it is a text filter, never an addressee — the framing
+every product that solved this converged on. **Attack:** can any transcript
+content escape the delimiters or re-address the model (a transcript that itself
+contains `TRANSCRIPT>>>`, or instructions like "ignore the above")? The guard is
+the backstop — verify that a model reply which is NOT a cleanup of the input
+(refusal, letter, commentary) is always rejected rather than delivered.
+
+**`08b14c5` — `sharesStem`: a prefix is not a stem.** THIS REPLACES THE RULE ANY
+EARLIER BRIEF DESCRIBED. Old rule: for words ≤4 chars, any prefix relation meant
+"same stem". That forgave DELETING or INVENTING a whole content word whenever
+some short unrelated word prefixed it — "we need to dig a new well" → "we need
+to dig a new" was ACCEPTED under both policies, because "we" prefixes "well".
+The partners are the words in every sentence (`we/well`, `we/went`, `it/item`,
+`in/into`, `at/attic`, `be/beam`, `do/door`, `us/used`, `the/there`, `an/and`).
+
+New rule (`CleanupGuard.isInflection`): a short stem must GROW BY AN INFLECTION —
+`s/es/ed/ing/er/est/ly`, plus `d/r/st` only on a stem already ending in "e", plus
+final-consonant doubling (`stop`→`stopped`); and a stem of 1-2 letters is never a
+stem (verb forms that short are irregular, and `sameIrregularVerb` covers them).
+**Attack:** find a pair the new rule still forgives where the two words are NOT
+morphologically related, especially one where both plausibly occur in the same
+dictation. A dictionary audit found only an "-er" tail (`corn/corner`,
+`off/offer`, `cent/center`) — deliberately left, because tightening it rejects
+`own`→`owner` and `low`→`lower`. Also verify the converse: that a legitimate
+non-native repair is not now rejected (the suite pins `ask`→`asked`,
+`use`→`used`, `work`→`working`, `stop`→`stopped`, `ship`→`shipped`).
+
+**`08b14c5` — contraction heads.** `"do not touch it"` → `"Don't touch it."` had
+been passing only because "do" prefixed the unspoken token "don" that `allWords`
+splits out of "don't". That accident is now an explicit rule: an `n't` head is
+forgiven only when it is `<a word actually spoken> + "n"`. **Attack:** can a
+head-shaped token smuggle in a word the user never said (possessives, `won't`
+from "will not", curly apostrophes, an apostrophe at position 0)?
+
+**`bea6ce1` — the cleanup audit.** `CleanupGuard.rejection()` is now the single
+source of truth and `preservesMeaning` is literally `rejection(...) == nil`, so
+the audit can never report a verdict different from the one the guard took.
+History gains three columns (`cleanupProposed`, `cleanupDecision`,
+`cleanupRejectReason`) recording what the model proposed and what became of it.
+Motivation: 21 of 28 real dictations delivered text byte-identical to the raw
+transcript, and that is indistinguishable between "nothing to fix" and "the
+guard silently reverted everything".
+
+**Attack this ordering specifically:** a guard rejection reaches the pipeline as
+a thrown `cleanupProviderUnavailable`, i.e. the SAME error as "Apple
+Intelligence unavailable". The provider writes the precise verdict with
+`record`, the pipeline writes coarse outcomes with `recordIfAbsent`. Show a path
+where the coarse outcome overwrites the precise one, where an entry from
+dictation N is attributed to dictation N+1 (the controller takes the slot before
+AND after the cleanup call; two-phase delivery runs a SECOND cleanup after the
+record is saved), or where `CleanupAuditLog`'s lock is insufficient.
+
+**Also verify:** the refactor of `preservesMeaning` into `rejection` is
+behaviour-preserving — every one of the 203 pre-existing tests passes untouched,
+so any behaviour change would be a defect, not a policy change.
 
 ## Why this branch exists — a lived, week-long silent failure
 
@@ -91,9 +160,11 @@ their findings are fixed in `6d3d937` — see that commit message.
 4. **Atomic history updates.** `setEditedAfterInsert` / `updateCleanText` are
    single UPDATE statements under the store lock, not read-modify-write, so the
    correction watcher and two-phase refinement cannot clobber each other.
-5. **SQLite migration is positionally safe.** Four columns appended (ordinals
-   12–15); `readRow` guards on `sqlite3_column_count`; a real 12-column legacy
-   database is built and migrated in the test suite.
+5. **SQLite migration is positionally safe.** Columns are only ever APPENDED
+   (ordinals 12–15 for the timings, 16–18 for the cleanup audit); `readRow`
+   guards on `sqlite3_column_count`; a real 12-column legacy database is built
+   and migrated in the test suite. Verify a row written by the NEW binary is
+   still readable by the old one, and that the audit columns default to NULL.
 6. **Instrumentation is inert.** `engineName`/`decodeSeconds`/`arbiterSeconds`
    are diagnostic only — verify nothing branches on them.
 7. **Audio-capture path untouched** (tap/preroll/formats/drain).
@@ -108,6 +179,10 @@ their findings are fixed in `6d3d937` — see that commit message.
   compatibility of the 16-column rows.
 - Whether the banner can ever claim "not running" while Whisper IS serving
   dictations, or stay silent while it is not (the failure it exists to prevent).
+- The guard as a whole, adversarially: construct an edit that changes what the
+  user SAID and still passes `preservesMeaning` under `.grammarRepair`. Money,
+  dates, obligation, and who-owes-whom are the classes that matter. Round 2
+  found one of these; assume more exist.
 
 ## Accepted tradeoffs (do NOT flag)
 
@@ -123,6 +198,15 @@ their findings are fixed in `6d3d937` — see that commit message.
   reads "apple" and Whisper's wasted decode folds into that number. Known,
   follow-up sized, totals remain correct.
 - `decodeSeconds` is populated but not persisted (spare diagnostic).
+- The cleanup audit stores a THIRD copy of the dictation text
+  (`cleanupProposed`) in the same local database, under the same retention limit
+  and the same Clear History. Deliberate: it is the only way to answer "did the
+  guard throw away the polish?". (`AppSettings.privacyRedactionEnabled` is wired
+  to nothing — a known, pre-existing defect, tracked separately. Do not spend
+  the round on it.)
+- The guard is now slightly STRICTER than the build the owner used yesterday, so
+  a few edits that used to pass now fall back to the rule-based result. That
+  direction is the standing rule (verbatim fidelity outranks polish).
 - The legacy macOS <26 engine reports no engine name (irrelevant on target).
 - No unit tests for the app-target engine classes: the test target links
   VoiceFlowCore only (Command Line Tools, no XCTest) — a pre-existing structural
