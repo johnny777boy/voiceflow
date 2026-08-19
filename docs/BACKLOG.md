@@ -1,5 +1,70 @@
 # VoiceFlow — Backlog & Handoff (resume point)
 
+## ▶️ RESUME HERE (2026-08-18 night)
+
+**Yoni says on return:** *"Continue VoiceFlow — read the RESUME HERE section."*
+
+**State:** branch `feature/latency-instrumentation` (folder `VoiceFlow-accuracy`),
+head `9d4fc5b`, 201 tests, 0 warnings, installed and running. `main` (folder
+`VoiceFlow Main`) is 8 days stale and still has the DEAD Whisper engine — do not
+offer it as a rollback. Rollback = `Scripts/rollback_app.sh`.
+
+**His job, 3 minutes, the only thing that settles the accuracy argument:**
+```
+cd ~/Documents/projects/VoiceFlow/VoiceFlow-accuracy
+Scripts/wer_session.sh prompts     # read the 10 lines aloud, one dictation each
+Scripts/wer_session.sh score       # get a real number
+```
+Whisper large-v3 benchmarks ~7-8% WER; Apple's engine ~14%. If he lands near
+7-8%, transcription is fine and every remaining complaint is cleanup/formatting.
+
+### What tonight actually established (all measured, not reasoned)
+
+1. **Whisper was silently dead for 8+ days.** Toggle on, model on disk, every
+   dictation served by the weaker Apple engine, no error anywhere. Two causes:
+   tokenizer resolving into TCC-protected ~/Documents, and promptTokens making
+   WhisperKit 0.18 emit zero characters. Biasing disabled behind
+   `whisperPromptBiasingEnabled`; ROOT CAUSE STILL OPEN.
+2. **His accuracy complaint was never transcription.** Whisper hears him
+   correctly. The failures were all in cleanup.
+3. **The model was REFUSING his dictations.** Handed a bare transcript, Apple's
+   model reads second-person speech as a message addressed to it: "I'm sorry, but
+   I cannot help you with that", 3/3 runs. Another dictation made it write a
+   whole change-order letter. Fixed by delimiting the transcript with the framing
+   the whole category converged on (Voicebox/Handy/VoiceInk/Whispering).
+   MEASURED before/after on his Mac — see commit `9d4fc5b`.
+4. **His guard is genuinely ahead of the market.** No shipped competitor verifies
+   the AI didn't change your words; Wispr shipped that failure publicly (700+
+   complaints, "changed words users hadn't asked it to touch").
+5. **Keep the guard strict at the WORD level.** "Cultural Ghosting" (CHI EA '26):
+   semantic-similarity guards pass the edits that erase a non-native speaker's
+   voice — 10.26% identity-erasure at 0.748 semantic similarity.
+
+### OPEN — highest value first
+
+1. **`sharesStem` prefix hole (FOUND, NOT FIXED).** "dig a new **well**" → "dig a
+   new" is ACCEPTED because "we" is a prefix of "well". Any short word that
+   prefixes a longer one is forgiven. Same class: "the ER doctor" was only saved
+   by an existing test. FIX: require the shorter side to be >=4 chars, or a real
+   morphology check. **Do this first — it is a live meaning-loss hole.**
+2. **Codex verification + merge.** 24 commits unmerged. Until this lands, `main`
+   stays broken and rollback is compromised. Round 1 PASSED capture ownership,
+   round 2 FAILED on pronoun reordering (fixed, `a8cbd06`). Needs a re-run at
+   `9d4fc5b`.
+3. **WhisperKit promptTokens root cause** — Phase 1's headline feature is dormant.
+4. **The WER number** — never measured, needs his voice.
+5. **Latency**: measured bill is ~0.65s decode + ~1.2s cleanup. Two-phase delivery
+   is built and OFF; live-testing it is the cheapest felt-latency win.
+6. **Learning dictionary**: 0 suggestions in 224 dictations — design mismatch.
+
+### Do NOT do (learned the hard way tonight)
+- Do not add a discourse-marker word LIST (like/well/okay/right/actually). Audited
+  14/14 meaning losses. Position-gated rules only.
+- Do not relax the guard to semantic similarity (see #5 above).
+- Do not add "er" or "mm" to fillers ("the ER doctor", "50 mm trim").
+- Do not touch the audio-capture path without Yoni present (CLAUDE.md rule 6).
+
+
 Last updated: 2026-08-10. Read CLAUDE.md first (workflow ritual + product
 principles), then this, then docs/ROADMAP.md (phased plan to sellable).
 
