@@ -20,8 +20,17 @@ mkdir -p "$ARCHIVE"
 if [[ -d "$DEST" ]]; then
   STAMP="$(date +%Y%m%d-%H%M%S)"
   PREV_SHA="$(cat "$ARCHIVE/.current-sha" 2>/dev/null || echo unknown)"
-  ditto "$DEST" "$ARCHIVE/VoiceFlow-$STAMP-$PREV_SHA.app"
-  echo "==> archived the previous build as VoiceFlow-$STAMP-$PREV_SHA.app"
+  FINAL="$ARCHIVE/VoiceFlow-$STAMP-$PREV_SHA.app"
+  STAGING="$ARCHIVE/.staging-$STAMP.app"
+  # Stage then move: an interrupted or failed copy must never leave a PARTIAL
+  # bundle that a later rollback would happily restore over a working app.
+  trap 'rm -rf "$STAGING"' EXIT INT TERM
+  rm -rf "$STAGING"
+  ditto "$DEST" "$STAGING"
+  [[ -x "$STAGING/Contents/MacOS/VoiceFlow" ]] || { echo "error: archive copy incomplete; aborting" >&2; exit 1; }
+  mv "$STAGING" "$FINAL"
+  trap - EXIT INT TERM
+  echo "==> archived the previous build as $(basename "$FINAL")"
 fi
 
 osascript -e 'quit app "VoiceFlow"' 2>/dev/null || true
@@ -33,7 +42,11 @@ git -C "$ROOT" rev-parse --short HEAD > "$ARCHIVE/.current-sha" 2>/dev/null || t
 open -a "$DEST"
 
 # Keep only the newest $KEEP archives.
-ls -dt "$ARCHIVE"/VoiceFlow-*.app 2>/dev/null | tail -n +$((KEEP + 1)) | while read -r old; do
+# Sort by NAME (the stamp is zero-padded and sortable), never by mtime: ditto
+# preserves the source bundle's mtime, so every archive carries the app's build
+# time and `ls -t` would prune the newest.
+{ ls -d "$ARCHIVE"/VoiceFlow-*.app 2>/dev/null || true; } | sort -r | tail -n +$((KEEP + 1)) | while read -r old; do
+  [[ -n "$old" ]] || continue
   rm -rf "$old"; echo "==> pruned $(basename "$old")"
 done
 

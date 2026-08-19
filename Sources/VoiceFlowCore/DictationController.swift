@@ -331,6 +331,16 @@ public actor DictationController {
     private func refineInPlace(
         raw: String, delivered: String, context: CleanupContext
     ) async -> String {
+        // Phase two happens after the text is already on screen, so there is no
+        // latency to protect — only a hang to bound. Cutting it at the dictation
+        // path's ceiling would discard a repair the user was never waiting for.
+        let context = CleanupContext(
+            mode: context.mode, strength: context.strength, vocabulary: context.vocabulary,
+            languageCode: context.languageCode,
+            spokenPunctuationEnabled: context.spokenPunctuationEnabled,
+            fastPathEnabled: context.fastPathEnabled,
+            cleanupTimeout: 90
+        )
         guard let refined = try? await cleanup.clean(raw, context: context),
               !refined.isEmpty, refined != delivered else { return delivered }
         // A new dictation supersedes this one: never reach into a field the user

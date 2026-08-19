@@ -53,6 +53,8 @@ public struct CleanupPipeline: CleanupProviding {
                     Log.cleanup.notice("AI cleanup applied (\(base.count, privacy: .public)→\(result.count, privacy: .public) chars)")
                 } catch VoiceFlowError.cleanupProviderUnavailable {
                     Log.cleanup.notice("AI cleanup unavailable; rule-based result")
+                } catch is CancellationError {
+                    throw CancellationError()   // a cancelled dictation stays cancelled
                 } catch is CleanupTimeout {
                     Log.cleanup.error("AI cleanup TIMED OUT after \(context.cleanupTimeout, privacy: .public)s — delivering the rule-based result")
                 } catch {
@@ -73,29 +75,58 @@ public struct CleanupPipeline: CleanupProviding {
 
     /// Run `work`, abandoning it if it exceeds `seconds`.
     ///
-    /// The on-device model can hang indefinitely — Apple Intelligence has no
-    /// contract to return — and there was no deadline anywhere on this path. A
-    /// hung cleanup meant the dictation never completed at all: the overlay sat
-    /// on "Transcribing…" forever and the user's words were lost, with nothing
-    /// in the log to say why. A dictation must ALWAYS be delivered; polish is
-    /// optional, delivery is not.
+    /// A task group CANNOT do this job, and the first version of this function
+    /// wrongly used one: `withThrowingTaskGroup` awaits every child before it
+    /// returns, and `cancelAll()` is only a cooperative request. Measured with a
+    /// child that ignores cancellation (the shape of a hung XPC/ANE call), a 1s
+    /// deadline returned after 8.5s — i.e. it did not bound the very hang it was
+    /// written to bound.
     ///
-    /// The loser task is cancelled, so a timed-out model call stops consuming
-    /// the ANE rather than lingering behind the next dictation.
+    /// So: race the work against a timer through a once-guarded continuation and
+    /// ABANDON the loser. A genuinely wedged model task then leaks until the OS
+    /// reaps it — the correct trade, because the alternative is losing the user's
+    /// dictation, and delivery is not optional.
     static func withDeadline<T: Sendable>(
         seconds: TimeInterval,
         _ work: @escaping @Sendable () async throws -> T
     ) async throws -> T {
-        guard seconds > 0 else { return try await work() }
-        return try await withThrowingTaskGroup(of: T.self) { group in
-            group.addTask { try await work() }
-            group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-                throw CleanupTimeout()
+        guard seconds > 0, seconds.isFinite else { return try await work() }
+        let claimed = Claim()
+        let workTask = Task { try await work() }
+        let timerTask = Task {
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+        }
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<T, Error>) in
+                Task {
+                    do {
+                        let value = try await workTask.value
+                        if claimed.claim() { continuation.resume(returning: value) }
+                    } catch {
+                        if claimed.claim() { continuation.resume(throwing: error) }
+                    }
+                }
+                Task {
+                    await timerTask.value
+                    if claimed.claim() { continuation.resume(throwing: CleanupTimeout()) }
+                }
             }
-            defer { group.cancelAll() }
-            guard let first = try await group.next() else { throw CleanupTimeout() }
-            return first
+        } onCancel: {
+            workTask.cancel()
+            timerTask.cancel()
+        }
+    }
+
+    /// One-shot winner flag: whichever racer arrives first resumes the
+    /// continuation, and a second resume is structurally impossible.
+    private final class Claim: @unchecked Sendable {
+        private let lock = NSLock()
+        private var taken = false
+        func claim() -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            if taken { return false }
+            taken = true
+            return true
         }
     }
 

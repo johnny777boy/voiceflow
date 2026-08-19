@@ -282,10 +282,16 @@ private struct FixedLLM: CleanupProviding {
 }
 
 
-/// Never returns — stands in for the on-device model hanging.
+/// Hangs UNCOOPERATIVELY — ignores cancellation, like a wedged XPC/ANE call.
+///
+/// Deliberately not `Task.sleep`: sleep is cancellation-responsive, so a sleeping
+/// stand-in passes even against a deadline that cannot actually abandon a hang.
+/// The first version of `withDeadline` did exactly that and shipped a Critical.
 private struct HangingLLM: CleanupProviding {
     func clean(_ rawText: String, context: CleanupContext) async throws -> String {
-        try await Task.sleep(nanoseconds: 30_000_000_000)
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global().asyncAfter(deadline: .now() + 30) { c.resume() }
+        }
         return rawText
     }
 }

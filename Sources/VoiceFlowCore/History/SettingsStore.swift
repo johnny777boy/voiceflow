@@ -29,6 +29,9 @@ public final class SettingsStore: @unchecked Sendable {
     /// removed only if it exactly matches a known legacy seed (same bundle id,
     /// seeded mode or its hand-flipped cleanWriting variant, no copy-only flag) —
     /// anything the user customized survives.
+    /// Marks the one-time fast-path migration as applied.
+    static let fastPathMigrationKey = "migratedFastPathOff2026_08_18"
+
     public static func migrate(_ settings: AppSettings) -> AppSettings {
         let legacySeededBundleIDs: Set<String> = [
             "com.anthropic.claudefordesktop", "com.todesktop.230313mzl4w4u92",
@@ -37,6 +40,17 @@ public final class SettingsStore: @unchecked Sendable {
             "com.apple.Notes",
         ]
         var migrated = settings
+        // One-time (2026-08-18): force the short-utterance fast path OFF.
+        // Changing its DEFAULT was not enough — AppSettings encodes every key, so
+        // any existing settings.json already carries `fastShortUtterances: true`
+        // and `decodeIfPresent` keeps it. The install that reported the accuracy
+        // bug would therefore have kept skipping the repair pass on exactly the
+        // short dictations that needed it. The marker means a user who
+        // deliberately re-enables it is never overridden again.
+        if !UserDefaults.standard.bool(forKey: fastPathMigrationKey) {
+            migrated.fastShortUtterances = false
+            UserDefaults.standard.set(true, forKey: fastPathMigrationKey)
+        }
         migrated.perAppBehaviors.removeAll { rule in
             legacySeededBundleIDs.contains(rule.bundleIdentifier)
                 && (rule.defaultMode == .claudeCode || rule.defaultMode == .cleanWriting)
