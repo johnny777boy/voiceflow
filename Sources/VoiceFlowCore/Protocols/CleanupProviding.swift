@@ -11,6 +11,10 @@ public struct CleanupContext: Sendable, Equatable {
     public let spokenPunctuationEnabled: Bool
     /// Allow short casual utterances to skip the LLM pass entirely (latency).
     public let fastPathEnabled: Bool
+    /// How much freedom the cleanup model has over wording. `.grammarRepair`
+    /// lets it correct a non-native speaker's grammar (irregular verbs, missing
+    /// articles/prepositions); `.verbatim` forbids any word change at all.
+    public let guardPolicy: CleanupGuard.Policy
     /// Hard ceiling on the optional AI polish, in seconds. The on-device model
     /// can hang with no contract to return; past this the deterministic result
     /// is delivered instead. A dictation must always arrive — polish is
@@ -24,6 +28,7 @@ public struct CleanupContext: Sendable, Equatable {
         languageCode: String,
         spokenPunctuationEnabled: Bool = false,
         fastPathEnabled: Bool = true,
+        guardPolicy: CleanupGuard.Policy = .verbatim,
         cleanupTimeout: TimeInterval = 6
     ) {
         self.mode = mode
@@ -32,6 +37,7 @@ public struct CleanupContext: Sendable, Equatable {
         self.languageCode = languageCode
         self.spokenPunctuationEnabled = spokenPunctuationEnabled
         self.fastPathEnabled = fastPathEnabled
+        self.guardPolicy = guardPolicy
         self.cleanupTimeout = cleanupTimeout
     }
 }
