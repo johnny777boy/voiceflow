@@ -56,9 +56,14 @@ func runVerbatimTests(_ s: TestSuite) {
     }
 
     s.test("CleanupGuard still allows legitimate grammar fixes (stem variants)") { s in
+        // NOTE (2026-08-18): this used to also swap "for"→"in", which passed only
+        // by accident — "in" is a prefix of "interesting", and "for" is too short
+        // for the deletion check. Preposition swaps are now rejected under BOTH
+        // policies (Codex: "you owe me" → "you owe you"), so the test asserts what
+        // it always meant to: stem variants are fine.
         s.expect(CleanupGuard.preservesMeaning(
             original: "i am interesting for discuss the plan",
-            cleaned: "I am interested in discussing the plan."))
+            cleaned: "I am interested for discussing the plan."))
         s.expect(CleanupGuard.preservesMeaning(
             original: "send the report",
             cleaned: "Send the report."))
@@ -297,6 +302,22 @@ func runVerbatimTests(_ s: TestSuite) {
             original: "the panel is on the left side", cleaned: "the panel is on the leave side", policy: p))
         s.expectFalse(CleanupGuard.preservesMeaning(
             original: "bring the felt for the table", cleaned: "bring the feel for the table", policy: p))
+    }
+
+    s.test("grammar repair: reordering pronouns cannot flip who owes whom") { s in
+        let p = CleanupGuard.Policy.grammarRepair
+        // Codex round-1 FAIL. Identical words, identical counts — only the ORDER
+        // changed, and the set-based check saw nothing. Debt reversed.
+        s.expectFalse(CleanupGuard.preservesMeaning(
+            original: "you owe me and I owe you",
+            cleaned: "you owe you and I owe me", policy: p))
+        s.expectFalse(CleanupGuard.preservesMeaning(
+            original: "I send the invoice to you and you send the deposit to me",
+            cleaned: "you send the invoice to me and I send the deposit to you", policy: p))
+        // The same must hold under plain verbatim.
+        s.expectFalse(CleanupGuard.preservesMeaning(
+            original: "you owe me and I owe you",
+            cleaned: "you owe you and I owe me", policy: .verbatim))
     }
 
 }

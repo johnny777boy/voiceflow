@@ -99,25 +99,58 @@ public enum CleanupGuard {
         ["do", "does"],           // present auxiliary agreement
     ]
 
-    /// True when the edit swaps a meaning-bearing word for a different one —
-    /// "to"→"from", "might"→"will", "I"→"you", "is"→"was". Insertions and
-    /// deletions remain fine; it is SUBSTITUTION that changes meaning.
+    /// True when the edit changes the SEQUENCE of meaning-bearing words —
+    /// a swap ("to"→"from", "might"→"will") or a reordering.
+    ///
+    /// This must be order-aware, and the first version wasn't: it compared word
+    /// SETS, so "you owe me and I owe you" → "you owe you and I owe me" looked
+    /// identical (same words, same counts) while flipping who owes whom. Codex
+    /// found that one. Sets cannot see position, and position is exactly where
+    /// this class of meaning lives.
+    ///
+    /// So: extract the ordered sequence of meaning-bearing words, normalise pure
+    /// agreement (is/are → one symbol), and align the two sequences by longest
+    /// common subsequence. Insertions alone are fine (adding "the", "to").
+    /// Deletions alone are fine. But a deletion AND an insertion together is a
+    /// substitution or a reordering however it is spelled — and that is how
+    /// meaning changes.
     static func substitutesMeaningBearingWord(
         originalWords: [String], cleanedWords: [String]
     ) -> Bool {
-        let before = Set(originalWords), after = Set(cleanedWords)
-        let removed = before.subtracting(after).filter { semanticFunctionClasses[$0] != nil }
-        let added = after.subtracting(before).filter { semanticFunctionClasses[$0] != nil }
-        guard !removed.isEmpty, !added.isEmpty else { return false }
-        for lost in removed {
-            for gained in added {
-                let agreementOnly = interchangeableGroups.contains {
-                    $0.contains(lost) && $0.contains(gained)
-                }
-                if !agreementOnly { return true }
+        let before = semanticSequence(originalWords)
+        let after = semanticSequence(cleanedWords)
+        if before == after { return false }
+        let common = longestCommonSubsequenceLength(before, after)
+        let deleted = before.count - common
+        let inserted = after.count - common
+        return deleted > 0 && inserted > 0
+    }
+
+    /// The meaning-bearing words in order, with agreement variants collapsed so
+    /// "the tests is passing" → "are passing" reads as no change at all.
+    static func semanticSequence(_ words: [String]) -> [String] {
+        words.compactMap { word in
+            guard semanticFunctionClasses[word] != nil else { return nil }
+            if let group = interchangeableGroups.first(where: { $0.contains(word) }) {
+                return group.sorted().joined(separator: "|")
             }
+            return word
         }
-        return false
+    }
+
+    static func longestCommonSubsequenceLength(_ a: [String], _ b: [String]) -> Int {
+        guard !a.isEmpty, !b.isEmpty else { return 0 }
+        var previous = [Int](repeating: 0, count: b.count + 1)
+        var current = previous
+        for i in 1...a.count {
+            for j in 1...b.count {
+                current[j] = a[i - 1] == b[j - 1]
+                    ? previous[j - 1] + 1
+                    : max(previous[j], current[j - 1])
+            }
+            swap(&previous, &current)
+        }
+        return previous[b.count]
     }
 
     /// Words that fix a clause in TIME. Their multiset must be unchanged before
@@ -250,8 +283,12 @@ public enum CleanupGuard {
         // in its class, and tense markers must be untouched before irregular
         // verb forms are treated as equivalent.
         let tenseIntact = tenseMarkersUnchanged(originalWords, cleanedAllWords)
-        if policy == .grammarRepair,
-           substitutesMeaningBearingWord(originalWords: originalWords, cleanedWords: cleanedAllWords) {
+        // Applies under BOTH policies. The word-level checks below are
+        // bag-of-words, so they cannot see "you owe me and I owe you" becoming
+        // "you owe you and I owe me" — every word is still present. Verbatim is
+        // meant to be the STRICTER mode, so it certainly must not permit a
+        // reordering that reverses a debt.
+        if substitutesMeaningBearingWord(originalWords: originalWords, cleanedWords: cleanedAllWords) {
             return false
         }
         // Only tokens that literally follow an apostrophe in the cleaned text

@@ -180,7 +180,7 @@ func runCleanupTests(_ s: TestSuite) {
         // is indistinguishable from a homophone error ("pill" → "peel").
         s.expect(CleanupGuard.preservesMeaning(
             original: "I am interesting for discuss this problematic with your recommend tomorrow",
-            cleaned: "I am interested in discussing this problematic with your recommendation tomorrow."),
+            cleaned: "I am interested for discussing this problematic with your recommendation tomorrow."),
                  "stem-preserving rewrite accepted")
         s.expect(!CleanupGuard.preservesMeaning(
             original: "I am interesting for discuss this problematic with your recommend tomorrow",
@@ -228,7 +228,7 @@ func runCleanupTests(_ s: TestSuite) {
         s.expect(CleanupGuard.preservesMeaning(
             original: "You'll finish everything.", cleaned: "You finished everything."))
         s.expect(CleanupGuard.preservesMeaning(
-            original: "I am interesting for discuss this", cleaned: "I am interested in discussing this"))
+            original: "I am interesting for discuss this", cleaned: "I am interested for discussing this"))
     }
 
     s.test("fast path: THIS is what skipped the repair on short dictations") { s in
