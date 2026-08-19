@@ -320,25 +320,4 @@ func runVerbatimTests(_ s: TestSuite) {
             cleaned: "you owe you and I owe me", policy: .verbatim))
     }
 
-    s.test("cleanup: his real dictation is finally allowed to be cleaned") { s in
-        // The 2026-08-18 complaint, verbatim from history. Whisper heard him
-        // correctly; the guard rejected the repair and handed him the raw text.
-        let raw = "you're making this very complicated i'm not sure exactly like why did you create all this stuff we created so many things today all right so many things the the stuff the the push step whatever it is we did so many things not just the vendor where is all the rest of the stuff"
-        let clean = "You're making this very complicated. I'm not sure exactly why you created all this stuff. We created so many things today, so many things. The stuff, the push step, whatever it is. We did so many things, not just the vendor. Where is all the rest of the stuff?"
-        s.expect(CleanupGuard.preservesMeaning(original: raw, cleaned: clean, policy: .grammarRepair),
-                 "the clean version is STILL being rejected")
-    }
-
-    s.test("cleanup: a contractor's directions survive disfluency removal") { s in
-        let p = CleanupGuard.Policy.grammarRepair
-        // "right" is a direction in his work, so a bare "right" is never
-        // droppable — only the fixed phrase "all right" is.
-        s.expectFalse(CleanupGuard.preservesMeaning(
-            original: "turn right at the corner then stop", cleaned: "turn at the corner then stop", policy: p))
-        s.expectFalse(CleanupGuard.preservesMeaning(
-            original: "the panel on the left needs paint", cleaned: "the panel on the needs paint", policy: p))
-        s.expect(CleanupGuard.preservesMeaning(
-            original: "all right so we start tomorrow morning", cleaned: "So we start tomorrow morning.", policy: p))
-    }
-
 }

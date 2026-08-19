@@ -325,8 +325,6 @@ public enum CleanupGuard {
             if sharesStem(word, withAnyOf: cleanedWords) { continue }
             if policy == .grammarRepair {
                 if tenseIntact, cleanedWords.contains(where: { sameIrregularVerb(word, $0) }) { continue }
-                // Dropping a disfluency is the whole point of cleanup.
-                if isRemovableDisfluency(word, original: original, originalWords: originalWords) { continue }
                 // Dropping a function word is a grammar fix ("interesting FOR
                 // discuss" → "interested IN discussing"); dropping a content word
                 // is losing what he said, and stays forbidden.
@@ -506,42 +504,6 @@ public enum CleanupGuard {
     static func sentences(_ text: String) -> [String] {
         sentencePieces(text).map { $0.sentence.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-    }
-
-
-    /// Discourse markers a speaker drops in without meaning them — the words
-    /// that make a faithful transcript read like a mess.
-    ///
-    /// This list is the ANSWER to a real complaint: his transcripts arrived as
-    /// "so many things the the stuff the the push step", because every one of
-    /// these counted as a content word he said, so the cleanup's repair was
-    /// rejected wholesale and he got the raw text. A faithful transcript of
-    /// spontaneous speech is not a usable one.
-    ///
-    /// Deliberately EXCLUDED, however obvious they look: "right" and "left" on
-    /// their own. He is a remodeling contractor — "turn right at the corner",
-    /// "the left panel" — and deleting a direction is a real-world harm.
-    /// "all right" as a fixed phrase is handled separately below.
-    static let discourseMarkers: Set<String> = [
-        "like", "actually", "basically", "literally", "seriously", "honestly",
-        "anyway", "anyways", "well", "yeah", "yep", "yup", "okay", "ok",
-        "um", "uh", "uhh", "umm", "uhm", "erm", "hmm", "mhm", "ah", "oh",
-    ]
-
-    /// Whether dropping `word` from `original` is a disfluency removal rather
-    /// than a loss of meaning.
-    static func isRemovableDisfluency(
-        _ word: String, original: String, originalWords: [String]
-    ) -> Bool {
-        if discourseMarkers.contains(word) { return true }
-        // "all right" only as that exact phrase, never a bare "right".
-        if word == "right", original.lowercased().contains("all right") { return true }
-        // An immediately repeated word is a stutter: "the the", "so so".
-        for index in 1..<max(originalWords.count, 1)
-        where originalWords[index] == word && originalWords[index - 1] == word {
-            return true
-        }
-        return false
     }
 
 }
