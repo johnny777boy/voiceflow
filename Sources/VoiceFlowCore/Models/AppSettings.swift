@@ -36,8 +36,13 @@ public struct AppSettings: Codable, Sendable, Equatable {
     /// Accessibility (never screenshots, never uploaded). On by default: it is
     /// the accuracy lever that makes names/jargon transcribe correctly.
     public var screenContextEnabled: Bool
-    /// Let short casual utterances skip the LLM cleanup pass (saves ~1s on the
-    /// replies people send most often; questions and email always keep it).
+    /// Let short casual utterances skip the LLM cleanup pass. OFF by default
+    /// since 2026-08-18: it was built believing the guard reduced the model to a
+    /// punctuation pass, so skipping it cost nothing. That premise was FALSE —
+    /// the guard permits grammar repair — so the skip was silently discarding
+    /// real fixes on exactly the short bursts the recognizer struggles with most.
+    /// Speed may never cost accuracy (standing rule); use two-phase delivery to
+    /// recover the felt latency instead.
     public var fastShortUtterances: Bool
     /// EXPERIMENTAL, off by default: insert the deterministic text instantly and
     /// upgrade it in place when the LLM polish lands. Needs live testing before
@@ -66,7 +71,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
         privacyRedactionEnabled: Bool = false,
         spokenPunctuationEnabled: Bool = false,
         screenContextEnabled: Bool = true,
-        fastShortUtterances: Bool = true,
+        fastShortUtterances: Bool = false,
         twoPhaseDeliveryEnabled: Bool = false,
         micIdleReleaseEnabled: Bool = true
     ) {

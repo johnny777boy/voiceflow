@@ -216,6 +216,31 @@ func runCleanupTests(_ s: TestSuite) {
         s.expectEqual(AppSettings.autoMode(forBundleIdentifier: "com.example.mailroomInventory"), .cleanWriting)
         s.expectEqual(AppSettings.autoMode(forBundleIdentifier: "com.example.terminalVelocity"), .cleanWriting)
     }
+
+    // MARK: - The 2026-08-18 live defect: what actually blocked the repair
+
+    s.test("guard: the real-world grammar repairs are ALLOWED, not blocked") { s in
+        // Live example: he said "you finished everything?", the recognizer wrote
+        // "You'll finish everything." The guard was blamed for leaving it — wrongly.
+        // It PERMITS this repair ("finished" shares a stem with "finish"; the
+        // contraction shard "ll" is not a content word). Pinned so the guard is
+        // never again accused of a failure that belongs elsewhere.
+        s.expect(CleanupGuard.preservesMeaning(
+            original: "You'll finish everything.", cleaned: "You finished everything."))
+        s.expect(CleanupGuard.preservesMeaning(
+            original: "I am interesting for discuss this", cleaned: "I am interested in discussing this"))
+    }
+
+    s.test("fast path: THIS is what skipped the repair on short dictations") { s in
+        // 6 words, statement, cleanWriting ⇒ the LLM pass is skipped entirely, so
+        // no grammar repair is ever attempted. He dictates in short bursts, so the
+        // clips that are HARDEST for the recognizer were also the ones denied the
+        // repair pass — the accuracy complaint of 2026-08-18.
+        s.expect(ShortUtteranceFastPath.canSkipLLM(
+            "It's all done. You'll finish everything.", mode: .cleanWriting),
+            "the live example must be recognised as a fast-path skip")
+    }
+
 }
 
 private struct FailingLLM: CleanupProviding {
