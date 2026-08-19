@@ -241,6 +241,33 @@ func runCleanupTests(_ s: TestSuite) {
             "the live example must be recognised as a fast-path skip")
     }
 
+
+    // MARK: - The dictation must always arrive (2026-08-18 hang)
+
+    s.test("cleanup: a hung model cannot stall the dictation forever") { s in
+        // Live defect: the on-device model hung, nothing bounded it, and the
+        // dictation never completed — the overlay sat on "Transcribing…" and the
+        // user's words were lost. Polish is optional; delivery is not.
+        let pipeline = CleanupPipeline(llmProvider: HangingLLM(), useLLM: true)
+        let context = CleanupContext(
+            mode: .cleanWriting, strength: .standard, vocabulary: [],
+            languageCode: "en-US", fastPathEnabled: false, cleanupTimeout: 0.3)
+        let started = Date()
+        let result = blockingAwait { try? await pipeline.clean("hello there friend", context: context) }
+        let elapsed = Date().timeIntervalSince(started)
+        s.expectNotNil(result ?? nil, "the dictation was swallowed by the hung model")
+        s.expect(elapsed < 3, "clean() waited \(elapsed)s on a hung model instead of giving up")
+    }
+
+    s.test("cleanup: a model that answers within the deadline is still used") { s in
+        let pipeline = CleanupPipeline(llmProvider: FixedLLM(output: "Hello there, friend."), useLLM: true)
+        let context = CleanupContext(
+            mode: .cleanWriting, strength: .standard, vocabulary: [],
+            languageCode: "en-US", fastPathEnabled: false, cleanupTimeout: 5)
+        let result = blockingAwait { try? await pipeline.clean("hello there friend", context: context) }
+        s.expectEqual(result ?? nil, "Hello there, friend.")
+    }
+
 }
 
 private struct FailingLLM: CleanupProviding {
@@ -254,3 +281,11 @@ private struct FixedLLM: CleanupProviding {
     func clean(_ rawText: String, context: CleanupContext) async throws -> String { output }
 }
 
+
+/// Never returns — stands in for the on-device model hanging.
+private struct HangingLLM: CleanupProviding {
+    func clean(_ rawText: String, context: CleanupContext) async throws -> String {
+        try await Task.sleep(nanoseconds: 30_000_000_000)
+        return rawText
+    }
+}
