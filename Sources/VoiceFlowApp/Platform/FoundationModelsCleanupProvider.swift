@@ -26,7 +26,12 @@ final class FoundationModelsCleanupProvider: CleanupProviding, @unchecked Sendab
     }
 
     func clean(_ rawText: String, context: CleanupContext) async throws -> String {
+        // DIAGNOSTIC LOGGING (2026-08-18): three very different failures used to
+        // throw the same error and print one indistinguishable line ("AI cleanup
+        // unavailable"), which hid WHY dictations were never being repaired.
+        // Each cause now says its own name; content stays .private.
         guard SystemLanguageModel.default.isAvailable else {
+            Log.cleanup.error("AI cleanup: Apple Intelligence reports the model UNAVAILABLE")
             throw VoiceFlowError.cleanupProviderUnavailable
         }
         let instructions = CleanupPromptBuilder.systemPrompt(for: context.mode, strength: context.strength)
@@ -44,14 +49,24 @@ final class FoundationModelsCleanupProvider: CleanupProviding, @unchecked Sendab
         // instructions, then trim.
         let text = TextNormalizer.stripLLMPreamble(response.content)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { throw VoiceFlowError.cleanupProviderUnavailable }
+        guard !text.isEmpty else {
+            Log.cleanup.error("AI cleanup: model returned EMPTY output")
+            throw VoiceFlowError.cleanupProviderUnavailable
+        }
 
         // Safety net: cleanup must edit, not rewrite. If the model changed meaning
         // (dropped a negation, changed a number, or rewrote the whole topic), reject
         // it so the pipeline falls back to the deterministic result.
         guard CleanupGuard.preservesMeaning(original: rawText, cleaned: text) else {
+            // The model DID produce a repair and the guard vetoed it — the whole
+            // edit, including every punctuation and grammar fix bundled with the
+            // one clause the guard disliked. All-or-nothing rejection is why long
+            // dictations come back completely unrepaired.
+            Log.cleanup.error("AI cleanup: guard REJECTED the model's edit (\(rawText.count, privacy: .public)→\(text.count, privacy: .public) chars) — delivering unrepaired text")
+            Log.cleanup.debug("AI cleanup rejected edit — was: \(rawText, privacy: .private) / proposed: \(text, privacy: .private)")
             throw VoiceFlowError.cleanupProviderUnavailable
         }
+        Log.cleanup.notice("AI cleanup: guard ACCEPTED the model's edit (\(rawText.count, privacy: .public)→\(text.count, privacy: .public) chars)")
         return text
     }
 }

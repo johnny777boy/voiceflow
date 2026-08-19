@@ -9,10 +9,14 @@ Xcode, no XCTest; tests are the executable `swift run VoiceFlowTests`). The bar 
 1. **All work on a feature branch off `main`.** `main` is always the last
    verified-good version, tagged.
 2. **The installed app IS the staging environment.** Build from the branch
-   (`Scripts/build_app.sh`), back up `/Applications/VoiceFlow.app` if it isn't
-   already reproducible from a tag, install (`ditto dist/VoiceFlow.app
-   /Applications/VoiceFlow.app`), relaunch. Yoni tests by *living on it* with his
-   real voice. There is no other staging.
+   (`Scripts/build_app.sh release`) then install with **`Scripts/install_app.sh`**
+   — NEVER a bare `ditto` again. It archives the build being replaced (last 5
+   kept, stamped with its commit) so any regression is one command away from
+   undone: **`Scripts/rollback_app.sh`** (`--list` to choose an older one).
+   Yoni tests by *living on it* with his real voice. There is no other staging.
+   **Do not tell him to "reinstall from main" as the recovery path** — main can
+   be staler than the branch he is living on (it was 8 days behind, with a dead
+   engine, on 2026-08-18). Rollback means the previous ARCHIVED BUILD.
 3. **Yoni approves by experience, not by reading diffs.** If he doesn't like it:
    delete the branch, reinstall from main — main never knew.
 4. **Before merge: triple verification.** (a) A senior reviewer agent on the full
