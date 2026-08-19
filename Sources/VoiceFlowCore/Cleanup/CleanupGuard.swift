@@ -21,6 +21,7 @@ public enum CleanupGuard {
         case negationChanged(from: Int, to: Int)
         case numbersChanged(from: Set<String>, to: Set<String>)
         case substitutedMeaningBearingWord
+        case severedClause(before: String, after: String)
         case inventedWord(String)
         case droppedWord(String)
 
@@ -34,6 +35,8 @@ public enum CleanupGuard {
                 return "numbers changed (\(show(a)) → \(show(b)))"
             case .substitutedMeaningBearingWord:
                 return "reordered or substituted a meaning-bearing word"
+            case let .severedClause(before, after):
+                return "severed a clause (\"\(before). \(after)…\")"
             case let .inventedWord(w):      return "invented the word \"\(w)\""
             case let .droppedWord(w):       return "dropped the word \"\(w)\""
             }
@@ -47,6 +50,7 @@ public enum CleanupGuard {
             case .negationChanged: return "negation"
             case .numbersChanged: return "numbers"
             case .substitutedMeaningBearingWord: return "substitution"
+            case .severedClause: return "severed-clause"
             case .inventedWord: return "invented-word"
             case .droppedWord: return "dropped-word"
             }
@@ -164,6 +168,85 @@ public enum CleanupGuard {
         let deleted = before.count - common
         let inserted = after.count - common
         return deleted > 0 && inserted > 0
+    }
+
+    /// Words that cannot END a sentence cleanup invented: each one demands a
+    /// continuation, so a full stop after it means the clause was cut in half.
+    /// Particles that legitimately end English sentences ("turn it off", "slow
+    /// down", "come over") are deliberately absent.
+    static let cannotEndSentence: Set<String> = [
+        "a", "an", "the", "my", "your", "our", "their", "his", "her", "its",
+        "of", "to", "into", "onto", "with", "from", "at", "for", "upon",
+        "during", "within", "between", "among", "toward", "towards",
+        "and", "but", "or", "nor", "because", "although", "though", "while",
+        "whereas", "unless", "until", "whether", "if", "when", "since", "than",
+        "like", "that",
+    ]
+
+    /// Words that cannot START a sentence cleanup invented: each binds BACKWARD
+    /// to the clause before it, so putting a full stop in front of one changes
+    /// what was said. "Call me before the meeting" is not "Call me."
+    ///
+    /// "so", "then", "and" and "but" are deliberately absent — he opens
+    /// sentences with them constantly, and those breaks are honest.
+    static let cannotStartSentence: Set<String> = [
+        "because", "before", "after", "until", "unless", "if", "when", "while",
+        "since", "than", "though", "although", "whereas", "whenever", "wherever",
+        "that", "which", "who", "whom", "whose",
+    ]
+
+    /// Each word with the sentence terminator that immediately follows it.
+    static func tokensWithTerminators(_ text: String) -> [(word: String, terminator: Character?)] {
+        var out: [(word: String, terminator: Character?)] = []
+        var current = ""
+        for ch in text.lowercased() {
+            if ch.isLetter || ch.isNumber || ch == "'" || ch == "\u{2019}" {
+                current.append(ch)
+            } else {
+                if !current.isEmpty {
+                    out.append((current, ".!?".contains(ch) ? ch : nil))
+                    current = ""
+                } else if ".!?".contains(ch), let last = out.indices.last, out[last].terminator == nil {
+                    out[last].terminator = ch
+                }
+            }
+        }
+        if !current.isEmpty { out.append((current, nil)) }
+        return out
+    }
+
+    /// A sentence boundary cleanup INVENTED that cuts a clause in half.
+    ///
+    /// This closes the guard's blind spot: a split adds no words and removes
+    /// none, so every other check here is blind to it by construction — while
+    /// the split itself picks a meaning the speaker never picked. Probed
+    /// 2026-08-19: "call me before the meeting we can decide then" →
+    /// "Call me. Before the meeting we can decide then." was ACCEPTED, and it
+    /// turns a conditional instruction into an unconditional one.
+    ///
+    /// Only boundaries the SPEAKER did not dictate are judged; his own full
+    /// stops are his business.
+    static func severedClause(original: String, cleaned: String) -> (before: String, after: String)? {
+        let originalTokens = tokensWithTerminators(original)
+        let cleanedTokens = tokensWithTerminators(cleaned)
+        // The word pairs the speaker's own boundaries already separate. (A pair
+        // that occurs twice in one dictation — once broken, once not — excuses
+        // both; rare, and it errs toward accepting, i.e. toward today's
+        // behaviour rather than a new rejection.)
+        var dictated = Set<String>()
+        for i in originalTokens.indices.dropLast() where originalTokens[i].terminator != nil {
+            dictated.insert(originalTokens[i].word + "\u{1}" + originalTokens[i + 1].word)
+        }
+        for i in cleanedTokens.indices.dropLast() {
+            guard let terminator = cleanedTokens[i].terminator else { continue }
+            let lead = cleanedTokens[i].word, follow = cleanedTokens[i + 1].word
+            if dictated.contains(lead + "\u{1}" + follow) { continue }
+            // A dangling lead is only wrong before a full stop: "what is it
+            // like?" ends on "like" perfectly well.
+            if terminator == ".", cannotEndSentence.contains(lead) { return (lead, follow) }
+            if cannotStartSentence.contains(follow) { return (lead, follow) }
+        }
+        return nil
     }
 
     /// The meaning-bearing words in order, with agreement variants collapsed so
@@ -348,6 +431,11 @@ public enum CleanupGuard {
         // reordering that reverses a debt.
         if substitutesMeaningBearingWord(originalWords: originalWords, cleanedWords: cleanedAllWords) {
             return .substitutedMeaningBearingWord
+        }
+        // Punctuation carries meaning too — and the word-level checks below
+        // cannot see it, because a split changes no words at all.
+        if let cut = severedClause(original: original, cleaned: cleaned) {
+            return .severedClause(before: cut.before, after: cut.after)
         }
         // Only tokens that literally follow an apostrophe in the cleaned text
         // ("don't" → shard "t") are contraction shards — a blanket 1-char pass

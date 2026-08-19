@@ -391,6 +391,47 @@ func runVerbatimTests(_ s: TestSuite) {
         }
     }
 
+    s.test("guard: cleanup may not sever a clause with a full stop") { s in
+        // The guard's blind spot, found 2026-08-19 by probing it: a sentence
+        // split adds no words and removes none, so every word-level check is
+        // blind by construction — and the split PICKS a meaning the speaker
+        // never picked. "Call me before the meeting" is not "Call me."
+        for p in [CleanupGuard.Policy.grammarRepair, .verbatim] {
+            s.expectFalse(CleanupGuard.preservesMeaning(
+                original: "call me before the meeting we can decide then",
+                cleaned: "Call me. Before the meeting we can decide then.", policy: p),
+                "a conditional instruction became unconditional (\(p))")
+            s.expectFalse(CleanupGuard.preservesMeaning(
+                original: "I will not send it until you confirm",
+                cleaned: "I will not send it. Until you confirm.", policy: p),
+                "a condition was severed from its promise (\(p))")
+            s.expectFalse(CleanupGuard.preservesMeaning(
+                original: "we need to actually like go to the backlog",
+                cleaned: "we need to actually like. Go to the backlog.", policy: p),
+                "a sentence was left dangling on a function word (\(p))")
+        }
+    }
+
+    s.test("guard: honest sentence breaks still pass") { s in
+        let p = CleanupGuard.Policy.grammarRepair
+        // Splitting genuine run-on speech is the whole point of cleanup — the
+        // rule above must cost none of it.
+        s.expect(CleanupGuard.preservesMeaning(
+            original: "we finished the deck today the crew went home early",
+            cleaned: "We finished the deck today. The crew went home early.", policy: p))
+        s.expect(CleanupGuard.preservesMeaning(
+            original: "so we have a lot of stuff we keep adding stuff",
+            cleaned: "So we have a lot of stuff. We keep adding stuff.", policy: p))
+        // A boundary the SPEAKER dictated is not one cleanup invented.
+        s.expect(CleanupGuard.preservesMeaning(
+            original: "call me. before the meeting we can decide",
+            cleaned: "Call me. Before the meeting we can decide.", policy: p))
+        // Cleanup removing a filler next to an existing boundary is not a new break.
+        s.expect(CleanupGuard.preservesMeaning(
+            original: "we poured the slab. um the crew went home",
+            cleaned: "We poured the slab. The crew went home.", policy: p))
+    }
+
     s.test("stutters: repeated function words collapse, real repetition survives") { s in
         s.expectEqual(TextNormalizer.collapseStutters("so many things the the stuff the the push step"),
                       "so many things the stuff the push step")
