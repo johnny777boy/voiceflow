@@ -268,6 +268,16 @@ func runCleanupTests(_ s: TestSuite) {
         s.expectEqual(result ?? nil, "Hello there, friend.")
     }
 
+
+    s.test("cleanup: Apple's model leaking markdown must not reach the field") { s in
+        // MacWhisper shipped a release specifically for Apple Foundation Models
+        // emitting "accidental markdown or ticks" and ">" prefixes. Ours would
+        // surface as guard rejections — silent quality loss — rather than visible
+        // corruption, so the stripper has to handle them.
+        s.expectEqual(TextNormalizer.stripLLMPreamble("Here is the cleaned text:\nHello there."), "Hello there.")
+        s.expectEqual(TextNormalizer.stripLLMPreamble("```\nHello there.\n```"), "Hello there.")
+    }
+
 }
 
 private struct FailingLLM: CleanupProviding {

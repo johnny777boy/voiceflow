@@ -143,9 +143,24 @@ public enum TextNormalizer {
     /// text:"). Only matches when a cleaning keyword (cleaned/corrected/…) is present,
     /// so genuine content like "Here is the plan:" is left untouched.
     public static func stripLLMPreamble(_ text: String) -> String {
+        var text = text
         let pattern = "^\\s*(sure[,.]?\\s+)?(here'?s?\\s+(is\\s+)?)?(the\\s+)?(cleaned|corrected|polished|revised|edited)([ -]?up)?\\s+(text|version|transcript|sentence)\\s*:\\s*"
         if let r = text.range(of: pattern, options: [.regularExpression, .caseInsensitive]) {
-            return String(text[r.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            text = String(text[r.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        // Strip a wrapping code fence. Apple's on-device model is documented to
+        // leak markdown — MacWhisper shipped a release specifically for
+        // "accidental markdown or ticks" from Foundation Models. Left in, it
+        // reaches the guard as an invented word and the whole repair is rejected,
+        // so it costs quality silently rather than showing up as visible junk.
+        let fence = "^\\s*```[a-zA-Z]*\\s*\\n?([\\s\\S]*?)\\n?\\s*```\\s*$"
+        if let r = text.range(of: fence, options: [.regularExpression]) {
+            let inner = text[r]
+            if let open = inner.range(of: "```[a-zA-Z]*\\s*\\n?", options: .regularExpression),
+               let close = inner.range(of: "\\n?\\s*```\\s*$", options: .regularExpression) {
+                text = String(inner[open.upperBound..<close.lowerBound])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
         }
         return text
     }
