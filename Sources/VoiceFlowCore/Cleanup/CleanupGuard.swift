@@ -325,6 +325,7 @@ public enum CleanupGuard {
             if sharesStem(word, withAnyOf: cleanedWords) { continue }
             if policy == .grammarRepair {
                 if tenseIntact, cleanedWords.contains(where: { sameIrregularVerb(word, $0) }) { continue }
+                if isRemovableDisfluency(word, originalWords: originalWords) { continue }
                 // Dropping a function word is a grammar fix ("interesting FOR
                 // discuss" → "interested IN discussing"); dropping a content word
                 // is losing what he said, and stays forbidden.
@@ -504,6 +505,33 @@ public enum CleanupGuard {
     static func sentences(_ text: String) -> [String] {
         sentencePieces(text).map { $0.sentence.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+    }
+
+
+    /// Whether dropping `word` is a disfluency removal rather than a loss of
+    /// meaning. Deliberately NARROW — position-gated, never a bare word list.
+    ///
+    /// A previous attempt used a plain allowlist ("like", "well", "okay",
+    /// "right"…) and an audit found 14 out of 14 contractor-realistic meaning
+    /// losses: "dig a new WELL" → "dig a new", "the framing is OKAY" → "the
+    /// framing is", "he was SERIOUSLY injured" → "he was injured". Membership in
+    /// a set says nothing about the job a word is doing in a sentence.
+    ///
+    /// Research backs the caution: human annotators on the Switchboard corpus
+    /// could not agree on discourse "like"/"well"/"so" (κ 0.40–0.43), and
+    /// automatic detection peaks near 79% precision — one deletion in five wrong.
+    /// So only the position that is unambiguous is allowed here: filler "like"
+    /// immediately before a question word ("exactly LIKE why did you…"), which
+    /// cannot be the verb "like" or the preposition "like". "I like it",
+    /// "looks like rain" and "like this one" are all untouched.
+    static func isRemovableDisfluency(_ word: String, originalWords: [String]) -> Bool {
+        guard word == "like" else { return false }
+        let questionWords: Set<String> = ["why", "what", "when", "where", "who", "how", "which"]
+        for (index, token) in originalWords.enumerated() where token == "like" {
+            let next = index + 1 < originalWords.count ? originalWords[index + 1] : ""
+            if questionWords.contains(next) { return true }
+        }
+        return false
     }
 
 }
