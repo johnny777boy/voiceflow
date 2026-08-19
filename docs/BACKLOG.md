@@ -63,8 +63,37 @@ Cross-validated against the app's own live audit; both agree.
 does not degrade on long input (splitting a 76-word run-on cleaned no better and
 produced a wrong break, "we need to actually like. Go to the backlog").
 
-**Next:** change the prompt to segment run-ons, then prove it with the replay
-(sentences / longest before→after) AND confirm the guard still accepts.
+**The prompt was NOT the lever — measured, three variants, 25 real dictations:**
+
+| prompt | sentences | longest sentence |
+|---|---|---|
+| original (never asks for segmentation) | 106 → 118 | 86 → 77 |
+| long explicit "break run-ons, never sever a clause" | 106 → 112 | 86 → **86 (worse)** |
+| short "break it into sentences, move no word" | 106 → 118 | 86 → 77 (identical) |
+
+More instruction made the small model do LESS. The short version was a no-op.
+Both were reverted rather than shipped as churn. **Do not re-try prompt wording
+for run-ons without new evidence** — the on-device model will not segment his
+speech however it is asked. If run-ons are to be fixed, the next candidate is
+DETERMINISTIC segmentation in `RuleBasedCleanup` (now much safer to attempt,
+because `severedClause` catches the dangerous breaks), and it needs its own
+brainstorm before any code.
+
+**Landed instead (`424ef4a`): the guard's punctuation blind spot is closed.**
+It checked words and only words, so a split — which changes no words at all —
+was invisible. Probed before touching anything, and ACCEPTED all three of:
+"call me before the meeting we can decide then" → "Call me. Before the
+meeting…"; "I will not send it until you confirm" → "I will not send it.
+Until…"; "we need to actually like go to the backlog" → "…actually like. Go
+to…". The first two change what he said. Verified over 25 real dictations to
+fire ZERO times — a seatbelt for future segmentation work, not a new
+restriction on today's output.
+
+**Also seen in the replay, worth a decision:** the guard refuses the model's
+attempt to fix "bridge" → "branch" (a real Whisper mis-hearing) because that is
+a dropped word, and refuses it removing his profanity. Both are the strict
+policy working as designed; whether mis-transcription repair should be allowed
+is Yoni's call, not a bug.
 
 1. **THE AUDIT IS LIVE — use it.** Dictate normally for a few hours on the
    installed build, then:
