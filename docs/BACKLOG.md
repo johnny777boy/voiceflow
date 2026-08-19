@@ -1,11 +1,11 @@
 # VoiceFlow — Backlog & Handoff (resume point)
 
-## ▶️ RESUME HERE (2026-08-18 night)
+## ▶️ RESUME HERE (2026-08-18 late / 2026-08-19)
 
 **Yoni says on return:** *"Continue VoiceFlow — read the RESUME HERE section."*
 
 **State:** branch `feature/latency-instrumentation` (folder `VoiceFlow-accuracy`),
-head `9d4fc5b`, 201 tests, 0 warnings, installed and running. `main` (folder
+head `08b14c5`, 203 tests, 0 warnings, installed and running. `main` (folder
 `VoiceFlow Main`) is 8 days stale and still has the DEAD Whisper engine — do not
 offer it as a rollback. Rollback = `Scripts/rollback_app.sh`.
 
@@ -42,15 +42,14 @@ Whisper large-v3 benchmarks ~7-8% WER; Apple's engine ~14%. If he lands near
 
 ### OPEN — highest value first
 
-1. **`sharesStem` prefix hole (FOUND, NOT FIXED).** "dig a new **well**" → "dig a
-   new" is ACCEPTED because "we" is a prefix of "well". Any short word that
-   prefixes a longer one is forgiven. Same class: "the ER doctor" was only saved
-   by an existing test. FIX: require the shorter side to be >=4 chars, or a real
-   morphology check. **Do this first — it is a live meaning-loss hole.**
+1. ~~**`sharesStem` prefix hole**~~ — **FIXED `08b14c5`**, details below.
+   Nothing for Yoni to do: it is covered by tests. It does need to be in the
+   Codex re-run, and it changes felt behaviour slightly (see the note).
 2. **Codex verification + merge.** 24 commits unmerged. Until this lands, `main`
    stays broken and rollback is compromised. Round 1 PASSED capture ownership,
    round 2 FAILED on pronoun reordering (fixed, `a8cbd06`). Needs a re-run at
-   `9d4fc5b`.
+   `08b14c5` — and the CleanupGuard section of the brief must be rewritten: it
+   still describes the old prefix rule.
 3. **WhisperKit promptTokens root cause** — Phase 1's headline feature is dormant.
 4. **The WER number** — never measured, needs his voice.
 5. **Latency**: measured bill is ~0.65s decode + ~1.2s cleanup. Two-phase delivery
@@ -63,6 +62,37 @@ Whisper large-v3 benchmarks ~7-8% WER; Apple's engine ~14%. If he lands near
 - Do not relax the guard to semantic similarity (see #5 above).
 - Do not add "er" or "mm" to fillers ("the ER doctor", "50 mm trim").
 - Do not touch the audio-capture path without Yoni present (CLAUDE.md rule 6).
+
+### FIXED 2026-08-19 — `sharesStem`: a prefix is not a stem (`08b14c5`)
+
+The hole, under BOTH policies: any word of ≤4 chars that prefixed a longer word
+forgave DELETING or INVENTING that longer word. "we need to dig a new well" →
+"we need to dig a new" was ACCEPTED. The partners were the words in every
+sentence he speaks — and several of them prefix his own vocabulary:
+we/well, we/went, it/item, in/into, **at/attic, be/beam, do/door**, us/used,
+the/there, an/and.
+
+Now a short stem must GROW BY AN INFLECTION (`s/es/ed/ing/er/est/ly`, plus
+`d/r/st` on an "e" stem, plus final-consonant doubling so stop→stopped), and a
+1-2 letter stem is never a stem — verb forms that short are irregular, and
+`sameIrregularVerb` already covers them.
+
+Two EXISTING tests were the safety net for what the strictness cost:
+"do not touch it" → "Don't touch it." had been passing only because "do"
+prefixed the contraction head "don". That now has its own precise rule — an
+"n't" head is forgiven only when its base word was actually spoken — and
+stop→stopped needed the doubling case. Neither would have surfaced without
+running the suite.
+
+Residual, measured against `/usr/share/dict/words`: a thin "-er" tail
+(corn/corner, off/offer, cent/center) survives. It needs BOTH words in the same
+dictation, unlike the old hole which fired on "we". Left alone deliberately —
+tightening further rejects real repairs (own→owner, low→lower).
+
+Expected felt effect: the guard now REJECTS a few edits it used to allow, so
+slightly more output arrives rule-based/verbatim. That is the correct direction
+(verbatim fidelity outranks polish), but it is a behaviour change worth watching
+for in daily use.
 
 
 Last updated: 2026-08-10. Read CLAUDE.md first (workflow ritual + product
