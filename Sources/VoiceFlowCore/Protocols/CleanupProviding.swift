@@ -11,14 +11,19 @@ public struct CleanupContext: Sendable, Equatable {
     public let spokenPunctuationEnabled: Bool
     /// Allow short casual utterances to skip the LLM pass entirely (latency).
     public let fastPathEnabled: Bool
-    /// Hard ceiling on the optional AI polish, in seconds. 15s on the dictation
-    /// path: measured cleanups run 0.6–4.4s, and a 6s cap sat close enough to
-    /// that to cut off a WORKING pass on a cold model or under ANE contention —
-    /// which would silently cost the repair, the very harm the standing accuracy
-    /// rule forbids. This is a hang-stopper, not a latency knob. The on-device model
+    /// How much freedom the cleanup model has over wording. `.grammarRepair`
+    /// lets it correct a non-native speaker's grammar (irregular verbs, missing
+    /// articles/prepositions); `.verbatim` forbids any word change at all.
+    public let guardPolicy: CleanupGuard.Policy
+    /// Hard ceiling on the optional AI polish, in seconds. The on-device model
     /// can hang with no contract to return; past this the deterministic result
     /// is delivered instead. A dictation must always arrive — polish is
     /// optional, delivery is not. 0 disables the deadline (tests only).
+    ///
+    /// 15s on the dictation path: measured cleanups run 0.6–4.4s, and a 6s cap
+    /// sat close enough to that to cut off a WORKING pass on a cold model or
+    /// under ANE contention — silently costing the repair, which the standing
+    /// accuracy rule forbids. This is a hang-stopper, not a latency knob.
     public let cleanupTimeout: TimeInterval
 
     public init(
@@ -28,6 +33,7 @@ public struct CleanupContext: Sendable, Equatable {
         languageCode: String,
         spokenPunctuationEnabled: Bool = false,
         fastPathEnabled: Bool = false,
+        guardPolicy: CleanupGuard.Policy = .verbatim,
         cleanupTimeout: TimeInterval = 15
     ) {
         self.mode = mode
@@ -36,6 +42,7 @@ public struct CleanupContext: Sendable, Equatable {
         self.languageCode = languageCode
         self.spokenPunctuationEnabled = spokenPunctuationEnabled
         self.fastPathEnabled = fastPathEnabled
+        self.guardPolicy = guardPolicy
         self.cleanupTimeout = cleanupTimeout
     }
 }

@@ -135,4 +135,66 @@ func runVerbatimTests(_ s: TestSuite) {
         s.expectEqual(decoded?.spokenPunctuationEnabled, false)
         s.expectEqual(decoded?.historyRetentionLimit, 350)
     }
+    // MARK: - Grammar repair (Yoni, 2026-08-18): fix HOW he said it, never WHAT
+
+    s.test("grammar repair: a non-native speaker's real errors are fixed") { s in
+        let p = CleanupGuard.Policy.grammarRepair
+        // Irregular verbs — the commonest non-native error, and invisible to a
+        // stem check ("go"/"went" share no letters).
+        s.expect(CleanupGuard.preservesMeaning(
+            original: "he go to the store yesterday",
+            cleaned: "he went to the store yesterday", policy: p))
+        // Missing article + preposition + agreement, all at once.
+        s.expect(CleanupGuard.preservesMeaning(
+            original: "I am interesting for discuss this",
+            cleaned: "I am interested in discussing this", policy: p))
+        s.expect(CleanupGuard.preservesMeaning(
+            original: "he go store yesterday",
+            cleaned: "he went to the store yesterday", policy: p))
+        // Auxiliary tense fix.
+        s.expect(CleanupGuard.preservesMeaning(
+            original: "the tests is passing now",
+            cleaned: "the tests are passing now", policy: p))
+    }
+
+    s.test("grammar repair: WHAT he said is still locked down") { s in
+        let p = CleanupGuard.Policy.grammarRepair
+        // Content words may never be invented...
+        s.expectFalse(CleanupGuard.preservesMeaning(
+            original: "send the file", cleaned: "send the invoice file", policy: p))
+        // ...nor dropped.
+        s.expectFalse(CleanupGuard.preservesMeaning(
+            original: "cancel the Tuesday meeting", cleaned: "cancel the meeting", policy: p))
+        // Negation stays absolute — the flip that changes everything.
+        s.expectFalse(CleanupGuard.preservesMeaning(
+            original: "do not delete it", cleaned: "do delete it", policy: p))
+        // Numbers stay exact.
+        s.expectFalse(CleanupGuard.preservesMeaning(
+            original: "transfer 300 dollars", cleaned: "transfer 3000 dollars", policy: p))
+        // Names are content, not structure.
+        s.expectFalse(CleanupGuard.preservesMeaning(
+            original: "ask Sarah about it", cleaned: "ask Michael about it", policy: p))
+    }
+
+    s.test("grammar repair: the 'Thank' → 'Thank you.' defect stays impossible") { s in
+        // The 2026-08-08 live defect. "you" is a function word, so a naive
+        // closed-class rule would wave it through; the length-scaled insertion
+        // budget gives a very short utterance NO room to grow.
+        s.expectFalse(CleanupGuard.preservesMeaning(
+            original: "Thank", cleaned: "Thank you.", policy: .grammarRepair))
+        s.expectFalse(CleanupGuard.preservesMeaning(
+            original: "Yes", cleaned: "Yes, I will do it.", policy: .grammarRepair))
+        s.expectEqual(CleanupGuard.insertionBudget(originalWordCount: 3), 0)
+        s.expect(CleanupGuard.insertionBudget(originalWordCount: 10) >= 1)
+    }
+
+    s.test("grammar repair: verbatim policy is unchanged for anyone who keeps it") { s in
+        // The founding behaviour must survive intact behind the setting.
+        s.expectFalse(CleanupGuard.preservesMeaning(
+            original: "he go to the store yesterday",
+            cleaned: "he went to the store yesterday", policy: .verbatim))
+        s.expectFalse(CleanupGuard.preservesMeaning(
+            original: "he go store", cleaned: "he go to the store", policy: .verbatim))
+    }
+
 }

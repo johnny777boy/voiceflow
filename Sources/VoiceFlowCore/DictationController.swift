@@ -224,7 +224,8 @@ public actor DictationController {
             vocabulary: settings.vocabulary,
             languageCode: settings.languageCode,
             spokenPunctuationEnabled: settings.spokenPunctuationEnabled,
-            fastPathEnabled: settings.fastShortUtterances
+            fastPathEnabled: settings.fastShortUtterances,
+            guardPolicy: settings.grammarRepairEnabled ? .grammarRepair : .verbatim
         )
 
         // Two-phase delivery (OFF by default, needs live testing): put the

@@ -57,7 +57,7 @@ final class FoundationModelsCleanupProvider: CleanupProviding, @unchecked Sendab
         // Safety net: cleanup must edit, not rewrite. If the model changed meaning
         // (dropped a negation, changed a number, or rewrote the whole topic), reject
         // it so the pipeline falls back to the deterministic result.
-        guard CleanupGuard.preservesMeaning(original: rawText, cleaned: text) else {
+        guard CleanupGuard.preservesMeaning(original: rawText, cleaned: text, policy: context.guardPolicy) else {
             // The model DID produce a repair and the guard vetoed it — the whole
             // edit, including every punctuation and grammar fix bundled with the
             // one clause the guard disliked. All-or-nothing rejection is why long
