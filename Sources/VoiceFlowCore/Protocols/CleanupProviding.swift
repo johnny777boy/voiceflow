@@ -11,6 +11,11 @@ public struct CleanupContext: Sendable, Equatable {
     public let spokenPunctuationEnabled: Bool
     /// Allow short casual utterances to skip the LLM pass entirely (latency).
     public let fastPathEnabled: Bool
+    /// Hard ceiling on the optional AI polish, in seconds. The on-device model
+    /// can hang with no contract to return; past this the deterministic result
+    /// is delivered instead. A dictation must always arrive — polish is
+    /// optional, delivery is not. 0 disables the deadline (tests only).
+    public let cleanupTimeout: TimeInterval
 
     public init(
         mode: DictationMode,
@@ -18,7 +23,8 @@ public struct CleanupContext: Sendable, Equatable {
         vocabulary: [VocabularyEntry],
         languageCode: String,
         spokenPunctuationEnabled: Bool = false,
-        fastPathEnabled: Bool = true
+        fastPathEnabled: Bool = true,
+        cleanupTimeout: TimeInterval = 6
     ) {
         self.mode = mode
         self.strength = strength
@@ -26,6 +32,7 @@ public struct CleanupContext: Sendable, Equatable {
         self.languageCode = languageCode
         self.spokenPunctuationEnabled = spokenPunctuationEnabled
         self.fastPathEnabled = fastPathEnabled
+        self.cleanupTimeout = cleanupTimeout
     }
 }
 
