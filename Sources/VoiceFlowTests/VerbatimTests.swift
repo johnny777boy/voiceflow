@@ -320,6 +320,46 @@ func runVerbatimTests(_ s: TestSuite) {
             cleaned: "you owe you and I owe me", policy: .verbatim))
     }
 
+    s.test("guard: a short word may not forgive dropping a longer unrelated word") { s in
+        // The prefix hole: "we" is a prefix of "well"/"went", so ANY sentence
+        // containing "we" used to license deleting or inventing those words.
+        // Coincidental spelling is not morphology.
+        for p in [CleanupGuard.Policy.verbatim, .grammarRepair] {
+            s.expectFalse(CleanupGuard.preservesMeaning(
+                original: "we need to dig a new well", cleaned: "we need to dig a new", policy: p),
+                "'well' dropped, excused by 'we' (policy \(p))")
+            s.expectFalse(CleanupGuard.preservesMeaning(
+                original: "we went to the site today", cleaned: "we to the site today", policy: p),
+                "'went' dropped, excused by 'we' (policy \(p))")
+            s.expectFalse(CleanupGuard.preservesMeaning(
+                original: "we are done for today", cleaned: "we are done well for today", policy: p),
+                "'well' invented, excused by 'we' (policy \(p))")
+            s.expectFalse(CleanupGuard.preservesMeaning(
+                original: "it is the last one", cleaned: "item is the last one", policy: p),
+                "'item' invented, excused by 'it' (policy \(p))")
+        }
+    }
+
+    s.test("guard: real inflection of a short stem still passes") { s in
+        let p = CleanupGuard.Policy.grammarRepair
+        // The fix above must not cost the repairs the guard exists to allow.
+        s.expect(CleanupGuard.preservesMeaning(
+            original: "he ask me for the invoice", cleaned: "he asked me for the invoice", policy: p))
+        s.expect(CleanupGuard.preservesMeaning(
+            original: "we use the new saw", cleaned: "we used the new saw", policy: p))
+        s.expect(CleanupGuard.preservesMeaning(
+            original: "he work on the deck", cleaned: "he working on the deck", policy: p))
+        // Regular verbs that double the final consonant are the same word too.
+        s.expect(CleanupGuard.preservesMeaning(
+            original: "I stop the water yesterday", cleaned: "I stopped the water yesterday", policy: p))
+        s.expect(CleanupGuard.preservesMeaning(
+            original: "we ship the tile monday", cleaned: "we shipped the tile monday", policy: p))
+        // Control: the head of an "n't" contraction is forgiven ONLY when its
+        // base word was spoken — it is not a doorway for new words.
+        s.expectFalse(CleanupGuard.preservesMeaning(
+            original: "the crew finished the deck", cleaned: "the mason's crew finished the deck", policy: p))
+    }
+
     s.test("stutters: repeated function words collapse, real repetition survives") { s in
         s.expectEqual(TextNormalizer.collapseStutters("so many things the the stuff the the push step"),
                       "so many things the stuff the push step")

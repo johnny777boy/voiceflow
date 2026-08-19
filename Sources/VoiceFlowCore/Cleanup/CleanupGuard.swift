@@ -295,10 +295,16 @@ public enum CleanupGuard {
         // ("don't" → shard "t") are contraction shards — a blanket 1-char pass
         // would let cleanup invent "I"/"a" (Codex verification finding).
         let shards = contractionShards(cleaned)
+        let heads = contractionHeads(cleaned)
         var insertionsUsed = 0
         let budget = policy == .grammarRepair ? insertionBudget(originalWordCount: originalWords.count) : 0
         for word in allWords(cleaned) where !originalSet.contains(word) {
             if shards.contains(word) { continue }              // "don't" → "don","t"
+            // The head of an "n't" contraction of a word he actually said:
+            // "do not" → "don't" gives the unspoken token "don". Nothing else
+            // is forgiven here — the negation count is checked separately.
+            if heads.contains(word), word.hasSuffix("n"),
+               originalSet.contains(String(word.dropLast())) { continue }
             if word.allSatisfy({ $0.isNumber }) { continue }   // digit sets equal per step 3
             if sharesStem(word, withAnyOf: originalWords) { continue }
             if policy == .grammarRepair {
@@ -336,17 +342,52 @@ public enum CleanupGuard {
         return true
     }
 
+    /// English inflectional endings. A short stem may only grow by one of these
+    /// — that is what separates morphology from a spelling coincidence.
+    /// `eStemSuffixes` need a stem already ending in "e" ("use"→"used",
+    /// "nice"→"nicer"), which is also what keeps "an"→"and" out.
+    private static let inflectionSuffixes: Set<String> = ["s", "es", "ed", "ing", "er", "est", "ly"]
+    private static let eStemSuffixes: Set<String> = ["d", "r", "st"]
+
+    /// True when `longer` is `stem` plus an inflectional ending.
+    static func isInflection(stem: String, of longer: String) -> Bool {
+        // A 1-2 letter stem is not a stem, it is a coincidence: "we"+"ll",
+        // "we"+"nt", "it"+"em", "in"+"to", "us"+"ed". Verb forms that short
+        // ("go"→"going") are irregular anyway, and `sameIrregularVerb` knows
+        // they are the same verb.
+        guard stem.count >= 3, longer.count > stem.count, longer.hasPrefix(stem) else { return false }
+        var suffix = String(longer.dropFirst(stem.count))
+        // Regular verbs double the final consonant: "stop"→"stopped",
+        // "ship"→"shipped", "trim"→"trimming". Un-double before matching, but
+        // only the consonant that is actually there — "can"+"not" un-doubles to
+        // "ot", "mat"+"tress" to "ress", and neither is an ending.
+        if let last = stem.last, last.isLetter, !"aeiou".contains(last),
+           suffix.count > 1, suffix.first == last {
+            suffix.removeFirst()
+        }
+        if inflectionSuffixes.contains(suffix) { return true }
+        return stem.hasSuffix("e") && eStemSuffixes.contains(suffix)
+    }
+
     /// True when `word` looks like a morphological variant of some candidate:
-    /// for short words (≤4 chars) one must be a prefix of the other ("go"~
-    /// "going", "you"~"your"); for longer words, a shared prefix of ≥4 chars
-    /// covering at least half of the shorter word ("discussing"~"discuss").
+    /// a short stem (≤4 chars) must GROW BY AN INFLECTION ("ask"~"asked",
+    /// "use"~"used"); for longer words, a shared prefix of ≥4 chars covering at
+    /// least half of the shorter word ("discussing"~"discuss").
     /// Homophones like "peel"~"pill", "czech"~"check", "tank"~"bank" fail both.
+    ///
+    /// The short case used to accept ANY prefix relation, which forgave dropping
+    /// or inventing a whole content word whenever some short unrelated word
+    /// happened to prefix it: "we need to dig a new well" → "… a new" passed
+    /// because "we" prefixes "well". Same class: "we"/"went", "it"/"item",
+    /// "in"/"into", "the"/"there". A prefix is not a stem.
     private static func sharesStem(_ word: String, withAnyOf candidates: [String]) -> Bool {
         for other in candidates where other != word {
             let common = zip(word, other).prefix { $0 == $1 }.count
             let shorter = min(word.count, other.count)
             if shorter <= 4 {
-                if common == shorter, common >= 2 { return true }   // prefix relation
+                let stem = word.count <= other.count ? word : other
+                let grown = word.count <= other.count ? other : word
+                if isInflection(stem: stem, of: grown) { return true }
             } else if common >= 4, common * 2 >= shorter {
                 return true
             }
@@ -359,6 +400,25 @@ public enum CleanupGuard {
         text.lowercased()
             .split { !($0.isLetter || $0.isNumber) }
             .map(String.init)
+    }
+
+    /// Letter-runs that immediately PRECEDE an apostrophe: the head half of a
+    /// contraction ("don't" → "don", "couldn't" → "couldn"). `allWords` splits
+    /// these off as words that were never spoken, so 4a needs to recognise them
+    /// — but only the "n't" family, and only when the base word really was
+    /// spoken ("don" is allowed only because "do" is in the original).
+    static func contractionHeads(_ text: String) -> Set<String> {
+        var heads = Set<String>()
+        let lower = Array(text.lowercased())
+        for i in lower.indices where lower[i] == "'" || lower[i] == "\u{2019}" {
+            var j = i - 1
+            var head = ""
+            while j >= lower.startIndex, lower[j].isLetter {
+                head.insert(lower[j], at: head.startIndex); j -= 1
+            }
+            if !head.isEmpty { heads.insert(head) }
+        }
+        return heads
     }
 
     /// Letter-runs that immediately follow an apostrophe (' or ’) after a letter
