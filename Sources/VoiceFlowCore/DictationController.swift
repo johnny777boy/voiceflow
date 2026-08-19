@@ -26,6 +26,9 @@ public actor DictationController {
     private let audio: AudioRecording
     private let transcriber: Transcribing
     private let cleanup: CleanupProviding
+    /// Where the cleanup stage writes what it proposed and what became of it, so
+    /// history can answer "did the guard throw away the polish?" (2026-08-19).
+    private let cleanupAudit: CleanupAuditLog?
     private let inserter: TextInserting
     private let activeApp: ActiveAppProviding
     private let history: HistoryStoring
@@ -86,7 +89,8 @@ public actor DictationController {
         history: HistoryStoring,
         settings: AppSettings = .default,
         time: TimeSource = SystemTimeSource(),
-        screenContext: ScreenContextProviding? = nil
+        screenContext: ScreenContextProviding? = nil,
+        cleanupAudit: CleanupAuditLog? = nil
     ) {
         self.audio = audio
         self.transcriber = transcriber
@@ -97,6 +101,7 @@ public actor DictationController {
         self.settings = settings
         self.time = time
         self.screenContext = screenContext
+        self.cleanupAudit = cleanupAudit
     }
 
     public func updateSettings(_ newValue: AppSettings) {
@@ -234,10 +239,13 @@ public actor DictationController {
         // single insertion of the fully-cleaned text.
         let twoPhase = settings.twoPhaseDeliveryEnabled && mode != .raw && settings.cleanupStrength != .off
         let cleanupStarted = time.now()
+        // Nothing from a previous dictation may be attributed to this one.
+        _ = cleanupAudit?.take()
         let firstPass = twoPhase
             ? try await cleanup.deterministicClean(raw, context: context)
             : try await cleanup.clean(raw, context: context)
         let cleanupSeconds = max(0, time.now() - cleanupStarted)
+        let audit = cleanupAudit?.take()
 
         // Re-verify destination immediately before insertion.
         let current = activeApp.captureSnapshot()
@@ -287,6 +295,9 @@ public actor DictationController {
             arbiterSeconds: arbiterSeconds,
             cleanupSeconds: cleanupSeconds,
             engineUsed: transcription.engineName,
+            cleanupProposed: audit?.proposed,
+            cleanupDecision: audit?.decision,
+            cleanupRejectReason: audit?.reason,
             errorMessage: outcome.note ?? plan.note,
             createdAt: time.date()
         )

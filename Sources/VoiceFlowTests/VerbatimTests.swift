@@ -360,6 +360,37 @@ func runVerbatimTests(_ s: TestSuite) {
             original: "the crew finished the deck", cleaned: "the mason's crew finished the deck", policy: p))
     }
 
+    s.test("guard: every refusal names its reason (the audit record)") { s in
+        let p = CleanupGuard.Policy.grammarRepair
+        func why(_ a: String, _ b: String, _ policy: CleanupGuard.Policy = .grammarRepair) -> String? {
+            CleanupGuard.rejection(original: a, cleaned: b, policy: policy)?.description
+        }
+        // An accepted edit has NO reason.
+        s.expect(why("he ask me for the invoice", "he asked me for the invoice") == nil)
+        // Each refusal must say which check failed, and name the word.
+        s.expectEqual(why("we need to dig a new well", "we need to dig a new"),
+                      "dropped the word \"well\"")
+        s.expectEqual(why("we are done for today", "we are done well for today"),
+                      "invented the word \"well\"")
+        s.expectEqual(why("do not delete the file", "do delete the file"),
+                      "negation changed (1 → 0)")
+        s.expectEqual(why("the deposit is 3000 dollars", "the deposit is 4000 dollars"),
+                      "numbers changed (3000 → 4000)")
+        s.expectEqual(why("you owe me and I owe you", "you owe you and I owe me"),
+                      "reordered or substituted a meaning-bearing word")
+        // The reason must survive under verbatim too.
+        s.expect(why("we need to dig a new well", "we need to dig a new", .verbatim) != nil)
+        // And it must agree with preservesMeaning, always — one source of truth.
+        let pairs = [("we need to dig a new well", "we need to dig a new"),
+                     ("he ask me for the invoice", "he asked me for the invoice"),
+                     ("do not touch it", "Don't touch it."),
+                     ("it is fine", "It is fine.")]
+        for (a, b) in pairs {
+            s.expectEqual(CleanupGuard.preservesMeaning(original: a, cleaned: b, policy: p),
+                          why(a, b) == nil, "verdict and reason disagree for: \(a) -> \(b)")
+        }
+    }
+
     s.test("stutters: repeated function words collapse, real repetition survives") { s in
         s.expectEqual(TextNormalizer.collapseStutters("so many things the the stuff the the push step"),
                       "so many things the stuff the push step")

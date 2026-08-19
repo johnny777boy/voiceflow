@@ -231,6 +231,42 @@ func runCleanupTests(_ s: TestSuite) {
             original: "I am interesting for discuss this", cleaned: "I am interested for discussing this"))
     }
 
+    s.test("cleanup audit: every path says what it did, including the silent ones") { s in
+        // The silent paths are the ones that made the complaint unanswerable:
+        // a fast-path skip and a rejected polish both deliver the rule result.
+        let skipped = CleanupAuditLog()
+        _ = blockingAwait { try? await CleanupPipeline(
+            llmProvider: FixedLLM(output: "REFINED"), useLLM: true, audit: skipped)
+            .clean("we finished the deck today",
+                   context: CleanupContext(mode: .cleanWriting, strength: .standard,
+                                           vocabulary: VocabularyEntry.defaults,
+                                           languageCode: "en-US", fastPathEnabled: true)) }
+        s.expectEqual(skipped.take()?.decision, "fast-path")
+
+        let rulesOnly = CleanupAuditLog()
+        _ = blockingAwait { try? await CleanupPipeline(useLLM: false, audit: rulesOnly)
+            .clean("this is a longer sentence that the rules alone will handle",
+                   context: ctx(.cleanWriting)) }
+        s.expectEqual(rulesOnly.take()?.decision, "rules-only")
+
+        let broken = CleanupAuditLog()
+        _ = blockingAwait { try? await CleanupPipeline(
+            llmProvider: FailingLLM(), useLLM: true, audit: broken)
+            .clean("this is a longer sentence that the model will fail on",
+                   context: ctx(.cleanWriting)) }
+        s.expectEqual(broken.take()?.decision, "unavailable")
+
+        // Each dictation's account is taken exactly once — never inherited.
+        let once = CleanupAuditLog()
+        once.record(.init(decision: "accepted"))
+        s.expectEqual(once.take()?.decision, "accepted")
+        s.expectNil(once.take())
+        // And the precise inner verdict outranks the coarse outer one.
+        once.record(.init(proposed: "x", decision: "rejected", reason: "dropped the word \"well\""))
+        once.recordIfAbsent(.init(decision: "unavailable"))
+        s.expectEqual(once.take()?.decision, "rejected")
+    }
+
     s.test("fast path: THIS is what skipped the repair on short dictations") { s in
         // 6 words, statement, cleanWriting ⇒ the LLM pass is skipped entirely, so
         // no grammar repair is ever attempted. He dictates in short bursts, so the

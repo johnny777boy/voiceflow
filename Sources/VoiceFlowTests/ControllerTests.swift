@@ -22,7 +22,64 @@ private func makeController(
     return (controller, inserter, history, app, clock)
 }
 
+/// A stand-in for the on-device model: proposes `proposal`, then reports to the
+/// audit log exactly what the real provider reports.
+private struct AuditingCleanup: CleanupProviding {
+    let proposal: String
+    let audit: CleanupAuditLog
+    func prewarm() {}
+    func clean(_ rawText: String, context: CleanupContext) async throws -> String {
+        let merged = CleanupGuard.safelyMerged(
+            original: rawText, cleaned: proposal, policy: context.guardPolicy)
+        if merged == proposal {
+            audit.record(.init(proposed: proposal, decision: "accepted"))
+            return merged
+        }
+        let reason = CleanupGuard.rejection(
+            original: rawText, cleaned: proposal, policy: context.guardPolicy)?.description
+        if merged == rawText {
+            audit.record(.init(proposed: proposal, decision: "rejected", reason: reason))
+            throw VoiceFlowError.cleanupProviderUnavailable
+        }
+        audit.record(.init(proposed: proposal, decision: "partial", reason: reason))
+        return merged
+    }
+}
+
 func runControllerTests(_ s: TestSuite) {
+    s.test("history records WHY the guard threw away the AI polish") { s in
+        // The whole point: a reverted dictation must not look like a dictation
+        // the model had nothing to fix. Both deliver rawText — only the audit
+        // tells them apart.
+        let audit = CleanupAuditLog()
+        let audio = MockAudioRecorder()
+        let transcriber = MockTranscriber()
+        // Long enough to bypass the short-utterance fast path, or no model runs.
+        transcriber.resultToReturn = TranscriptionResult(text: "we need to dig a new well behind the garage")
+        let inserter = MockTextInserter()
+        inserter.capabilities = DestinationCapabilities(
+            supportsAccessibilityInsertion: true, allowsSyntheticPaste: true, isSecureInput: false)
+        let history = InMemoryHistoryStore()
+        let controller = DictationController(
+            audio: audio, transcriber: transcriber,
+            cleanup: CleanupPipeline(
+                llmProvider: AuditingCleanup(
+                    proposal: "We need to dig a new behind the garage.", audit: audit),
+                useLLM: true),
+            inserter: inserter, activeApp: MockActiveAppProvider(snapshot: MockActiveAppProvider.terminal()),
+            history: history, settings: .default, time: MockTimeSource(), cleanupAudit: audit)
+        _ = blockingAwait { () -> DictationResult? in
+            try? await controller.beginRecording()
+            return try? await controller.finishRecording()
+        }
+        let saved = try history.allRecords().first
+        s.expectEqual(saved?.cleanupDecision, "rejected")
+        s.expectEqual(saved?.cleanupProposed, "We need to dig a new behind the garage.")
+        s.expectEqual(saved?.cleanupRejectReason, "dropped the word \"well\"")
+        // And the user still got his own words, unharmed.
+        s.expect(saved?.cleanText.contains("well") == true, "got: \(saved?.cleanText ?? "nil")")
+    }
+
     s.test("Full pipeline inserts via accessibility and records history") { s in
         // Code mode is now reached ONLY via an explicit user-set per-app rule
         // (uniform-formatting policy, 2026-08-08) — this test sets one so the

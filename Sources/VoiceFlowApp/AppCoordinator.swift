@@ -37,6 +37,8 @@ final class AppCoordinator: ObservableObject {
     private let settingsStore: SettingsStore
     private let history: HistoryStoring
     private let secureStore: SecureStoring
+    /// The cleanup stage's account of the dictation in flight (see CleanupAuditLog).
+    private let cleanupAudit: CleanupAuditLog
     private let overlay = OverlayController()
     private let suggestionStore: SuggestedVocabularyStore
     private var corrections: CorrectionWatcher?
@@ -69,6 +71,13 @@ final class AppCoordinator: ObservableObject {
         self.hotkeys = GlobalHotkeyManager()
         self.suggestionStore = SuggestedVocabularyStore(url: AppPaths.suggestedVocabularyURL())
 
+
+        // One audit slot shared by the cleanup stage and the controller: the
+        // stage writes what it proposed and what the guard did with it, the
+        // controller copies that onto the history record (2026-08-19).
+        let cleanupAudit = CleanupAuditLog()
+        self.cleanupAudit = cleanupAudit
+
         // AI cleanup provider: prefer Apple's on-device model (free, private, no API
         // key) on macOS 26; otherwise the optional Anthropic provider (needs a key).
         let llmProvider: CleanupProviding
@@ -80,7 +89,7 @@ final class AppCoordinator: ObservableObject {
             // cleanup/punctuation off for a whole session. The provider re-checks
             // availability on EVERY call and falls back to rule-based only when it's
             // genuinely not ready — so cleanup turns on the moment the model is ready.
-            llmProvider = FoundationModelsCleanupProvider()
+            llmProvider = FoundationModelsCleanupProvider(audit: cleanupAudit)
             useLLM = true
             Log.cleanup.notice("cleanup: on-device Foundation Models (re-checked per call)")
         } else {
@@ -89,7 +98,7 @@ final class AppCoordinator: ObservableObject {
             useLLM = loaded.useLLMCleanup
             Log.cleanup.notice("cleanup: Anthropic (API key) / rule-based")
         }
-        let pipeline = CleanupPipeline(llmProvider: llmProvider, useLLM: useLLM)
+        let pipeline = CleanupPipeline(llmProvider: llmProvider, useLLM: useLLM, audit: cleanupAudit)
         // Pick the best engine: on macOS 26 use Apple's SpeechAnalyzer (records the
         // whole clip, then transcribes with full context — far more accurate).
         // Otherwise fall back to the legacy streaming engine.
@@ -141,7 +150,8 @@ final class AppCoordinator: ObservableObject {
             activeApp: WorkspaceActiveAppProvider(),
             history: store,
             settings: loaded,
-            screenContext: AXScreenContextProvider()
+            screenContext: AXScreenContextProvider(),
+            cleanupAudit: cleanupAudit
         )
     }
 

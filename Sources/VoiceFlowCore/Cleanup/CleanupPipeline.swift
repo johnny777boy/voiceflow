@@ -12,15 +12,22 @@ public struct CleanupPipeline: CleanupProviding {
     private let ruleEngine: RuleBasedCleanup
     private let llmProvider: CleanupProviding?
     private let useLLM: Bool
+    /// Where this stage writes what it did, for the history audit. The provider
+    /// records the precise verdict (it is the only thing that sees the model's
+    /// proposal); the pipeline records the outcomes where NO proposal exists —
+    /// the silent paths that made "cleanup is not accurate" unanswerable.
+    private let audit: CleanupAuditLog?
 
     public init(
         ruleEngine: RuleBasedCleanup = RuleBasedCleanup(),
         llmProvider: CleanupProviding? = nil,
-        useLLM: Bool = false
+        useLLM: Bool = false,
+        audit: CleanupAuditLog? = nil
     ) {
         self.ruleEngine = ruleEngine
         self.llmProvider = llmProvider
         self.useLLM = useLLM
+        self.audit = audit
     }
 
     public func prewarm() {
@@ -43,6 +50,7 @@ public struct CleanupPipeline: CleanupProviding {
                 // Short casual utterance: the rules already produce what the
                 // guard-constrained model would have returned, ~1s sooner.
                 Log.cleanup.notice("AI cleanup skipped (short utterance fast path)")
+                audit?.recordIfAbsent(.init(decision: "fast-path"))
             } else {
                 do {
                     let refined = try await Self.withDeadline(seconds: context.cleanupTimeout) {
@@ -52,15 +60,23 @@ public struct CleanupPipeline: CleanupProviding {
                     result = trimmed.isEmpty ? base : trimmed
                     Log.cleanup.notice("AI cleanup applied (\(base.count, privacy: .public)→\(result.count, privacy: .public) chars)")
                 } catch VoiceFlowError.cleanupProviderUnavailable {
+                    // The guard's own REJECTION arrives here as a throw, and it
+                    // has already written the precise reason — never overwrite it.
+                    audit?.recordIfAbsent(.init(decision: "unavailable"))
                     Log.cleanup.notice("AI cleanup unavailable; rule-based result")
                 } catch is CancellationError {
                     throw CancellationError()   // a cancelled dictation stays cancelled
                 } catch is CleanupTimeout {
+                    audit?.recordIfAbsent(.init(decision: "timeout"))
                     Log.cleanup.error("AI cleanup TIMED OUT after \(context.cleanupTimeout, privacy: .public)s — delivering the rule-based result")
                 } catch {
+                    audit?.recordIfAbsent(.init(decision: "failed"))
                     Log.cleanup.error("AI cleanup failed, using rule-based result: \(String(describing: error), privacy: .public)")
                 }
             }
+        } else {
+            // No model was ever in play: raw mode, strength off, or LLM disabled.
+            audit?.recordIfAbsent(.init(decision: "rules-only"))
         }
 
         return finalTidy(result, context: context)

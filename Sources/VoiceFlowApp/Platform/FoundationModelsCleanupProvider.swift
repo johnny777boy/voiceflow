@@ -14,6 +14,11 @@ final class FoundationModelsCleanupProvider: CleanupProviding, @unchecked Sendab
 
     static var isAvailable: Bool { SystemLanguageModel.default.isAvailable }
 
+    /// Where the guard's verdict on this dictation is written (see CleanupAuditLog).
+    private let audit: CleanupAuditLog?
+
+    init(audit: CleanupAuditLog? = nil) { self.audit = audit }
+
     /// Load the model's weights while the user is still talking, so the LLM pass
     /// starts warm instead of paying a cold start on the first dictation of a
     /// session. A NEW session is still created per dictation — reusing one would
@@ -101,13 +106,21 @@ final class FoundationModelsCleanupProvider: CleanupProviding, @unchecked Sendab
         // clause used to discard every other repair in the dictation.
         let merged = CleanupGuard.safelyMerged(
             original: rawText, cleaned: text, policy: context.guardPolicy)
+        // The audit gets the model's proposal and the guard's verdict — this is
+        // the only place both are visible, and without it a reverted dictation
+        // is indistinguishable in history from one that needed no repair.
+        let reason = CleanupGuard.rejection(
+            original: rawText, cleaned: text, policy: context.guardPolicy)?.description
         if merged == text {
+            audit?.record(.init(proposed: text, decision: "accepted"))
             Log.cleanup.notice("AI cleanup: guard ACCEPTED the edit (\(rawText.count, privacy: .public)→\(text.count, privacy: .public) chars)")
         } else if merged == rawText {
+            audit?.record(.init(proposed: text, decision: "rejected", reason: reason))
             Log.cleanup.error("AI cleanup: guard REJECTED every sentence — delivering unrepaired text")
             Log.cleanup.debug("AI cleanup rejected — was: \(rawText, privacy: .private) / proposed: \(text, privacy: .private)")
             throw VoiceFlowError.cleanupProviderUnavailable
         } else {
+            audit?.record(.init(proposed: text, decision: "partial", reason: reason))
             Log.cleanup.notice("AI cleanup: guard kept the SAFE sentences and reverted the rest (\(rawText.count, privacy: .public)→\(merged.count, privacy: .public) chars)")
         }
         return merged

@@ -13,6 +13,46 @@ import Foundation
 
 public enum CleanupGuard {
 
+    /// Why the guard refused an edit. Carried into history so "the cleanup is
+    /// not accurate" can be answered from data instead of argued.
+    public enum Rejection: Sendable, Equatable, CustomStringConvertible {
+        case ballooned(from: Int, to: Int)
+        case gutted(from: Int, to: Int)
+        case negationChanged(from: Int, to: Int)
+        case numbersChanged(from: Set<String>, to: Set<String>)
+        case substitutedMeaningBearingWord
+        case inventedWord(String)
+        case droppedWord(String)
+
+        public var description: String {
+            switch self {
+            case let .ballooned(from, to):  return "output ballooned (\(from) → \(to) words)"
+            case let .gutted(from, to):     return "output gutted (\(from) → \(to) words)"
+            case let .negationChanged(a, b): return "negation changed (\(a) → \(b))"
+            case let .numbersChanged(a, b):
+                let show: (Set<String>) -> String = { $0.sorted().joined(separator: ",") }
+                return "numbers changed (\(show(a)) → \(show(b)))"
+            case .substitutedMeaningBearingWord:
+                return "reordered or substituted a meaning-bearing word"
+            case let .inventedWord(w):      return "invented the word \"\(w)\""
+            case let .droppedWord(w):       return "dropped the word \"\(w)\""
+            }
+        }
+
+        /// Stable, low-cardinality label for counting across a whole history.
+        public var kind: String {
+            switch self {
+            case .ballooned: return "ballooned"
+            case .gutted: return "gutted"
+            case .negationChanged: return "negation"
+            case .numbersChanged: return "numbers"
+            case .substitutedMeaningBearingWord: return "substitution"
+            case .inventedWord: return "invented-word"
+            case .droppedWord: return "dropped-word"
+            }
+        }
+    }
+
     /// How much freedom the cleanup model has.
     ///
     /// `verbatim` was the founding rule: not one word added, dropped or swapped.
@@ -251,21 +291,39 @@ public enum CleanupGuard {
     public static func preservesMeaning(
         original: String, cleaned: String, policy: Policy = .verbatim
     ) -> Bool {
+        rejection(original: original, cleaned: cleaned, policy: policy) == nil
+    }
+
+    /// Why the guard refuses this edit, or nil when it is safe to deliver.
+    ///
+    /// The verdict and the REASON are the same computation deliberately: an
+    /// audit that reports a different answer than the guard actually took is
+    /// worse than no audit. `preservesMeaning` is defined as "no reason".
+    ///
+    /// This exists because "the cleanup is not accurate" was unanswerable —
+    /// history stored only the delivered text, so a dictation the guard had
+    /// silently reverted looked exactly like one the model had nothing to fix.
+    public static func rejection(
+        original: String, cleaned: String, policy: Policy = .verbatim
+    ) -> Rejection? {
         let inWords = wordCount(original)
         let outWords = wordCount(cleaned)
 
         // 1. Length: reject a ballooned (hallucinated) or gutted output.
-        if inWords >= 3, outWords > inWords * 2 || outWords * 3 < inWords { return false }
+        if inWords >= 3, outWords > inWords * 2 { return .ballooned(from: inWords, to: outWords) }
+        if inWords >= 3, outWords * 3 < inWords { return .gutted(from: inWords, to: outWords) }
 
         // 2. Negation must be preserved. Dropping/adding a negation flips meaning
         //    ("do not delete" → "do delete"), which overlap checks miss because the
         //    words are short. This is the critical safety check.
-        if negationCount(original) != negationCount(cleaned) { return false }
+        let negBefore = negationCount(original), negAfter = negationCount(cleaned)
+        if negBefore != negAfter { return .negationChanged(from: negBefore, to: negAfter) }
 
         // 3. Numbers must match EXACTLY in both directions: none dropped
         //    ("$3.14" → "$4.15") and none invented (cleanup may not add digits
         //    the user never spoke).
-        if numbers(original) != numbers(cleaned) { return false }
+        let numsBefore = numbers(original), numsAfter = numbers(cleaned)
+        if numsBefore != numsAfter { return .numbersChanged(from: numsBefore, to: numsAfter) }
 
         // 4. BIDIRECTIONAL verbatim check (tightened 2026-08-08 after live-use
         //    evidence: cleanup invented "you" in 'Thank'→'Thank you.' through the
@@ -289,7 +347,7 @@ public enum CleanupGuard {
         // meant to be the STRICTER mode, so it certainly must not permit a
         // reordering that reverses a debt.
         if substitutesMeaningBearingWord(originalWords: originalWords, cleanedWords: cleanedAllWords) {
-            return false
+            return .substitutedMeaningBearingWord
         }
         // Only tokens that literally follow an apostrophe in the cleaned text
         // ("don't" → shard "t") are contraction shards — a blanket 1-char pass
@@ -318,7 +376,7 @@ public enum CleanupGuard {
                     continue
                 }
             }
-            return false
+            return .inventedWord(word)
         }
 
         //    4b. No deleted content words. Every significant original word must
@@ -337,9 +395,9 @@ public enum CleanupGuard {
                 // is losing what he said, and stays forbidden.
                 if functionWords.contains(word) { continue }
             }
-            return false
+            return .droppedWord(word)
         }
-        return true
+        return nil
     }
 
     /// English inflectional endings. A short stem may only grow by one of these

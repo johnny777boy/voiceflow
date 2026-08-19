@@ -83,6 +83,30 @@ func runHistoryStoreTests(_ s: TestSuite) {
         s.expectEqual(try reopened.record(id: r.id)?.cleanText, "persisted")
     }
 
+    s.test("SQLite stores the cleanup audit (proposal + verdict + reason)") { s in
+        // Without these, "the cleanup is not accurate" is unanswerable: a
+        // dictation the guard silently reverted is indistinguishable from one
+        // the model had nothing to fix. Both store rawText == cleanText.
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("voiceflow-audit-\(UUID().uuidString)", isDirectory: true)
+        let url = dir.appendingPathComponent("history.sqlite")
+        var r = makeRecord("we need to dig a new", at: 500)
+        r.rawText = "we need to dig a new well"
+        r.cleanupProposed = "We need to dig a new."
+        r.cleanupDecision = "rejected"
+        r.cleanupRejectReason = "dropped the word \"well\""
+        do { let store = try SQLiteHistoryStore(url: url); try store.save(r) }
+        let reopened = try SQLiteHistoryStore(url: url)
+        let back = try reopened.record(id: r.id)
+        s.expectEqual(back?.cleanupProposed, "We need to dig a new.")
+        s.expectEqual(back?.cleanupDecision, "rejected")
+        s.expectEqual(back?.cleanupRejectReason, "dropped the word \"well\"")
+        // Old rows (written before these columns existed) stay readable as nil.
+        let plain = makeRecord("older row", at: 400)
+        try reopened.save(plain)
+        s.expectNil(try reopened.record(id: plain.id)?.cleanupDecision)
+    }
+
     s.test("SettingsStore round-trips to disk") { s in
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("voiceflow-settings-\(UUID().uuidString)")

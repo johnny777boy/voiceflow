@@ -36,6 +36,18 @@ public struct TranscriptRecord: Codable, Sendable, Equatable, Hashable, Identifi
     public var cleanupSeconds: Double
     /// Which engine produced the text ("whisper" / "apple"), when known.
     public var engineUsed: String?
+    /// THE CLEANUP AUDIT (added 2026-08-19). History used to store only the
+    /// delivered text, which made "cleanup is not accurate" unanswerable: a
+    /// dictation whose polish the guard silently reverted looks identical to one
+    /// the model had nothing to fix — in both, cleanText == rawText.
+    ///
+    /// What the AI proposed, BEFORE the guard ruled on it. nil when no model ran.
+    public var cleanupProposed: String?
+    /// What happened to that proposal: "accepted", "partial" (some sentences
+    /// kept), "rejected", "unavailable", "timeout", "fast-path", "rules-only".
+    public var cleanupDecision: String?
+    /// When the guard refused, WHY — e.g. `dropped the word "well"`.
+    public var cleanupRejectReason: String?
     /// A non-fatal error/warning message, if the event degraded (e.g. fell back to copy-only).
     public var errorMessage: String?
     /// When the dictation happened.
@@ -56,6 +68,9 @@ public struct TranscriptRecord: Codable, Sendable, Equatable, Hashable, Identifi
         arbiterSeconds: Double = 0,
         cleanupSeconds: Double = 0,
         engineUsed: String? = nil,
+        cleanupProposed: String? = nil,
+        cleanupDecision: String? = nil,
+        cleanupRejectReason: String? = nil,
         errorMessage: String? = nil,
         createdAt: Date = Date()
     ) {
@@ -73,6 +88,9 @@ public struct TranscriptRecord: Codable, Sendable, Equatable, Hashable, Identifi
         self.arbiterSeconds = arbiterSeconds
         self.cleanupSeconds = cleanupSeconds
         self.engineUsed = engineUsed
+        self.cleanupProposed = cleanupProposed
+        self.cleanupDecision = cleanupDecision
+        self.cleanupRejectReason = cleanupRejectReason
         self.errorMessage = errorMessage
         self.createdAt = createdAt
     }
@@ -95,6 +113,9 @@ public struct TranscriptRecord: Codable, Sendable, Equatable, Hashable, Identifi
         arbiterSeconds = try c.decodeIfPresent(Double.self, forKey: .arbiterSeconds) ?? 0
         cleanupSeconds = try c.decodeIfPresent(Double.self, forKey: .cleanupSeconds) ?? 0
         engineUsed = try c.decodeIfPresent(String.self, forKey: .engineUsed)
+        cleanupProposed = try c.decodeIfPresent(String.self, forKey: .cleanupProposed)
+        cleanupDecision = try c.decodeIfPresent(String.self, forKey: .cleanupDecision)
+        cleanupRejectReason = try c.decodeIfPresent(String.self, forKey: .cleanupRejectReason)
         errorMessage = try c.decodeIfPresent(String.self, forKey: .errorMessage)
         createdAt = try c.decode(Date.self, forKey: .createdAt)
     }
