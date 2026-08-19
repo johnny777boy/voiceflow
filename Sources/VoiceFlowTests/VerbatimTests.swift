@@ -197,4 +197,45 @@ func runVerbatimTests(_ s: TestSuite) {
             original: "he go store", cleaned: "he go to the store", policy: .verbatim))
     }
 
+    // MARK: - Per-sentence reconciliation (one bad clause ≠ lose every repair)
+
+    s.test("merge: a safe sentence is kept even when another sentence oversteps") { s in
+        // The live pattern: the model fixes several things, oversteps in ONE
+        // clause, and all-or-nothing rejection threw away the good repairs too.
+        let original = "he go to the store yesterday. Send the file."
+        let cleaned  = "He went to the store yesterday. Send the invoice file."
+        let merged = CleanupGuard.safelyMerged(
+            original: original, cleaned: cleaned, policy: .grammarRepair)
+        s.expect(merged.contains("He went to the store yesterday."),
+                 "the safe repair was discarded: \(merged)")
+        s.expectFalse(merged.contains("invoice"),
+                      "an invented content word survived: \(merged)")
+    }
+
+    s.test("merge: a wholly safe edit passes through untouched") { s in
+        let merged = CleanupGuard.safelyMerged(
+            original: "he go to the store. i am interesting for discuss",
+            cleaned: "He went to the store. I am interested in discussing",
+            policy: .grammarRepair)
+        s.expectEqual(merged, "He went to the store. I am interested in discussing")
+    }
+
+    s.test("merge: when every sentence oversteps, nothing is delivered from it") { s in
+        let original = "send the file. cancel the Tuesday meeting."
+        let merged = CleanupGuard.safelyMerged(
+            original: original,
+            cleaned: "Send the invoice file. Cancel the meeting.",
+            policy: .grammarRepair)
+        s.expectEqual(merged, original, "unsafe text was delivered")
+    }
+
+    s.test("merge: unalignable sentence counts fall back to all-or-nothing") { s in
+        // The model merged two sentences into one — we cannot tell which repair
+        // belongs where, so no partial credit is given.
+        let original = "he go home. he sleep."
+        let merged = CleanupGuard.safelyMerged(
+            original: original, cleaned: "He went home and slept.", policy: .grammarRepair)
+        s.expectEqual(merged, original)
+    }
+
 }

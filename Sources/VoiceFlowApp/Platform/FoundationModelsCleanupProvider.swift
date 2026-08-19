@@ -57,16 +57,19 @@ final class FoundationModelsCleanupProvider: CleanupProviding, @unchecked Sendab
         // Safety net: cleanup must edit, not rewrite. If the model changed meaning
         // (dropped a negation, changed a number, or rewrote the whole topic), reject
         // it so the pipeline falls back to the deterministic result.
-        guard CleanupGuard.preservesMeaning(original: rawText, cleaned: text, policy: context.guardPolicy) else {
-            // The model DID produce a repair and the guard vetoed it — the whole
-            // edit, including every punctuation and grammar fix bundled with the
-            // one clause the guard disliked. All-or-nothing rejection is why long
-            // dictations come back completely unrepaired.
-            Log.cleanup.error("AI cleanup: guard REJECTED the model's edit (\(rawText.count, privacy: .public)→\(text.count, privacy: .public) chars) — delivering unrepaired text")
-            Log.cleanup.debug("AI cleanup rejected edit — was: \(rawText, privacy: .private) / proposed: \(text, privacy: .private)")
+        // Per-SENTENCE reconciliation, not all-or-nothing: one overstepping
+        // clause used to discard every other repair in the dictation.
+        let merged = CleanupGuard.safelyMerged(
+            original: rawText, cleaned: text, policy: context.guardPolicy)
+        if merged == text {
+            Log.cleanup.notice("AI cleanup: guard ACCEPTED the edit (\(rawText.count, privacy: .public)→\(text.count, privacy: .public) chars)")
+        } else if merged == rawText {
+            Log.cleanup.error("AI cleanup: guard REJECTED every sentence — delivering unrepaired text")
+            Log.cleanup.debug("AI cleanup rejected — was: \(rawText, privacy: .private) / proposed: \(text, privacy: .private)")
             throw VoiceFlowError.cleanupProviderUnavailable
+        } else {
+            Log.cleanup.notice("AI cleanup: guard kept the SAFE sentences and reverted the rest (\(rawText.count, privacy: .public)→\(merged.count, privacy: .public) chars)")
         }
-        Log.cleanup.notice("AI cleanup: guard ACCEPTED the model's edit (\(rawText.count, privacy: .public)→\(text.count, privacy: .public) chars)")
-        return text
+        return merged
     }
 }

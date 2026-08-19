@@ -277,4 +277,65 @@ public enum CleanupGuard {
             .map(String.init)
             .filter { $0.count > 3 }
     }
+
+    /// Keep the repairs that are safe instead of discarding all of them.
+    ///
+    /// `preservesMeaning` is all-or-nothing over the WHOLE text, and on a long
+    /// dictation that is the difference between "repaired" and "untouched": the
+    /// model fixes five things, one of them oversteps, and every fix — including
+    /// the punctuation — is thrown away together. Live logs showed exactly that,
+    /// which is why long dictations came back unrepaired while short ones
+    /// improved.
+    ///
+    /// So: align the two texts sentence by sentence and judge each pair on its
+    /// own. Safe sentences take the model's version, unsafe ones keep the
+    /// original verbatim. Every guarantee still holds per sentence — nothing is
+    /// weakened, the blast radius of one bad edit is just reduced from the whole
+    /// dictation to the sentence it happened in.
+    ///
+    /// Alignment is only attempted when both sides have the same sentence count.
+    /// If the model merged or split sentences we cannot say which repair belongs
+    /// to which, so it falls back to the original all-or-nothing judgement.
+    public static func safelyMerged(
+        original: String, cleaned: String, policy: Policy = .verbatim
+    ) -> String {
+        if preservesMeaning(original: original, cleaned: cleaned, policy: policy) {
+            return cleaned
+        }
+        let originalSentences = sentences(original)
+        let cleanedSentences = sentences(cleaned)
+        guard originalSentences.count == cleanedSentences.count,
+              originalSentences.count > 1 else {
+            return original
+        }
+        var kept = 0
+        var merged: [String] = []
+        for (before, after) in zip(originalSentences, cleanedSentences) {
+            if preservesMeaning(original: before, cleaned: after, policy: policy) {
+                merged.append(after)
+                kept += 1
+            } else {
+                merged.append(before)
+            }
+        }
+        return kept == 0 ? original : merged.joined(separator: " ")
+    }
+
+    /// Split into sentences, keeping terminal punctuation with its sentence.
+    static func sentences(_ text: String) -> [String] {
+        var out: [String] = []
+        var current = ""
+        for ch in text {
+            current.append(ch)
+            if ch == "." || ch == "!" || ch == "?" {
+                let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { out.append(trimmed) }
+                current = ""
+            }
+        }
+        let tail = current.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !tail.isEmpty { out.append(tail) }
+        return out
+    }
+
 }
