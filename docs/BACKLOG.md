@@ -1,11 +1,11 @@
 # VoiceFlow — Backlog & Handoff (resume point)
 
-## ▶️ RESUME HERE (2026-08-18 late / 2026-08-19)
+## ▶️ RESUME HERE (2026-08-19)
 
 **Yoni says on return:** *"Continue VoiceFlow — read the RESUME HERE section."*
 
 **State:** branch `feature/latency-instrumentation` (folder `VoiceFlow-accuracy`),
-head `08b14c5`, 203 tests, 0 warnings, installed and running. `main` (folder
+head `8c83bd2`, 207 tests, 0 warnings, installed and running. `main` (folder
 `VoiceFlow Main`) is 8 days stale and still has the DEAD Whisper engine — do not
 offer it as a rollback. Rollback = `Scripts/rollback_app.sh`.
 
@@ -42,14 +42,20 @@ Whisper large-v3 benchmarks ~7-8% WER; Apple's engine ~14%. If he lands near
 
 ### OPEN — highest value first
 
-1. ~~**`sharesStem` prefix hole**~~ — **FIXED `08b14c5`**, details below.
-   Nothing for Yoni to do: it is covered by tests. It does need to be in the
-   Codex re-run, and it changes felt behaviour slightly (see the note).
+1. **THE AUDIT IS LIVE — use it.** Dictate normally for a few hours on the
+   installed build, then:
+   ```
+   Scripts/audit_cleanup.py            # summary
+   Scripts/audit_cleanup.py --rejected # only what the guard threw away
+   ```
+   It shows what the AI PROPOSED, whether the guard kept it, and WHY it refused.
+   Until this ran there was no way to answer "it's not accurate" — see below.
 2. **Codex verification + merge.** 24 commits unmerged. Until this lands, `main`
    stays broken and rollback is compromised. Round 1 PASSED capture ownership,
    round 2 FAILED on pronoun reordering (fixed, `a8cbd06`). Needs a re-run at
-   `08b14c5` — and the CleanupGuard section of the brief must be rewritten: it
-   still describes the old prefix rule.
+   `bea6ce1`. The brief is REFRESHED and ready to paste:
+   `docs/CODEX-BRIEF-RECOVERY.md` (round 3 — new guard rule, audit ordering,
+   and an instruction to attack the guard adversarially).
 3. **WhisperKit promptTokens root cause** — Phase 1's headline feature is dormant.
 4. **The WER number** — never measured, needs his voice.
 5. **Latency**: measured bill is ~0.65s decode + ~1.2s cleanup. Two-phase delivery
@@ -62,6 +68,37 @@ Whisper large-v3 benchmarks ~7-8% WER; Apple's engine ~14%. If he lands near
 - Do not relax the guard to semantic similarity (see #5 above).
 - Do not add "er" or "mm" to fillers ("the ER doctor", "50 mm trim").
 - Do not touch the audio-capture path without Yoni present (CLAUDE.md rule 6).
+
+### 2026-08-19 — what his 28 dictations actually say (measured, not argued)
+
+He said "it still not accurate". The history database answers most of it:
+
+- **The engine is healthy.** Whisper served 27 of 28, zero errors, and the raw
+  transcripts read accurately. The one Apple-engine dictation is the worst text
+  in the set — evidence for the engine, not against it.
+- **Cleanup is nearly a no-op.** 21 of 28 delivered text BYTE-IDENTICAL to the
+  raw transcript. Where it fired it capitalised a first letter, applied
+  vocabulary ("codex"→"Codex"), and once made a real repair ("Why it can be" →
+  "Why can it be").
+- **What his text actually reads like:** 6.4% of delivered words are discourse
+  markers (like×28, so×20, actually×9, "I mean"×8), longest sentence 73 words,
+  5 sentences over 40 words. He edited after insert only 2/28 (7%).
+- **So the complaint is presentation, not transcription** — which the 2026-08-18
+  session suspected and could not prove. WER is still the missing number.
+
+**The blind spot, now closed (`bea6ce1`).** "cleanText == rawText" was
+indistinguishable between "the model had nothing to fix" and "the model fixed it
+and the guard reverted every word". History now records `cleanupProposed`,
+`cleanupDecision` and `cleanupRejectReason`, and `Scripts/audit_cleanup.py`
+reports them (engine split, decision breakdown, ranked refusal reasons, and how
+the delivered text reads). `CleanupGuard.rejection()` is the single source of
+truth — `preservesMeaning` is defined as "no reason" — so the audit can never
+disagree with the verdict the guard actually took.
+
+**Two Settings lies found while looking:** "Use AI cleanup (requires API key)"
+reads OFF but is ignored entirely on macOS 26 (on-device cleanup always runs);
+"Redact private transcripts" is wired to NOTHING. The second is spawned as its
+own task and matters more now that a third copy of each dictation is stored.
 
 ### FIXED 2026-08-19 — `sharesStem`: a prefix is not a stem (`08b14c5`)
 
