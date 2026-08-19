@@ -36,6 +36,9 @@ struct SettingsView: View {
             Picker("Cleanup strength", selection: $draft.cleanupStrength) {
                 ForEach(CleanupStrength.allCases, id: \.self) { Text($0.displayName).tag($0) }
             }
+            Toggle("Correct my grammar, not just punctuation", isOn: $draft.grammarRepairEnabled)
+            Text("Lets the on-device AI fix grammar — verb tenses, missing words like \"the\" and \"to\", subject–verb agreement — instead of only adding punctuation. It can never change your meaning: your own words, names, numbers and any \"not\" are locked, and it cannot swap words that carry meaning (\"to\"→\"from\", \"before\"→\"after\", \"I\"→\"you\"). Turn this off for strictly verbatim transcription.")
+                .font(.caption).foregroundStyle(.secondary)
             Toggle("Fast path for short phrases", isOn: $draft.fastShortUtterances)
             Text("Skips the AI polish for casual replies of eight words or fewer, saving about a second — but the AI pass also repairs grammar and misheard words, so skipping it can leave errors in short dictations. Off by default: accuracy first. Questions and email always keep the pass.")
                 .font(.caption).foregroundStyle(.secondary)

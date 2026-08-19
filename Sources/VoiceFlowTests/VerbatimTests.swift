@@ -145,9 +145,12 @@ func runVerbatimTests(_ s: TestSuite) {
             original: "he go to the store yesterday",
             cleaned: "he went to the store yesterday", policy: p))
         // Missing article + preposition + agreement, all at once.
+        // Partial repair, deliberately: "interesting"→"interested" and
+        // "discuss"→"discussing" land, but "for"→"in" does NOT, because allowing
+        // preposition swaps is what let "to Bob" become "from Bob".
         s.expect(CleanupGuard.preservesMeaning(
             original: "I am interesting for discuss this",
-            cleaned: "I am interested in discussing this", policy: p))
+            cleaned: "I am interested for discussing this", policy: p))
         s.expect(CleanupGuard.preservesMeaning(
             original: "he go store yesterday",
             cleaned: "he went to the store yesterday", policy: p))
@@ -215,9 +218,9 @@ func runVerbatimTests(_ s: TestSuite) {
     s.test("merge: a wholly safe edit passes through untouched") { s in
         let merged = CleanupGuard.safelyMerged(
             original: "he go to the store. i am interesting for discuss",
-            cleaned: "He went to the store. I am interested in discussing",
+            cleaned: "He went to the store. I am interested for discussing",
             policy: .grammarRepair)
-        s.expectEqual(merged, "He went to the store. I am interested in discussing")
+        s.expectEqual(merged, "He went to the store. I am interested for discussing")
     }
 
     s.test("merge: when every sentence oversteps, nothing is delivered from it") { s in
@@ -236,6 +239,64 @@ func runVerbatimTests(_ s: TestSuite) {
         let merged = CleanupGuard.safelyMerged(
             original: original, cleaned: "He went home and slept.", policy: .grammarRepair)
         s.expectEqual(merged, original)
+    }
+
+    // MARK: - The meaning-change scenarios a review proved were accepted
+
+    s.test("grammar repair: relational words can never be SWAPPED") { s in
+        let p = CleanupGuard.Policy.grammarRepair
+        // Every one of these was ACCEPTED by the first implementation. For a
+        // contractor dictating about money and schedules, each is a real-world
+        // harm, not a theoretical one.
+        let forbidden: [(String, String)] = [
+            ("transfer the deposit to Bob today please", "transfer the deposit from Bob today please"),
+            ("call me before the meeting on Monday", "call me after the meeting on Monday"),
+            ("keep the budget under 50 thousand for this", "keep the budget over 50 thousand for this"),
+            ("I got the quote for the supplier today", "I got the quote from the supplier today"),
+            ("I might send the payment tomorrow", "I will send the payment tomorrow"),
+            ("I can do it tomorrow myself", "I must do it tomorrow myself"),
+            ("we should review the contract before signing", "we must review the contract before signing"),
+            ("I will pay the contractor tomorrow", "You will pay the contractor tomorrow"),
+            ("he told me the price was fine yesterday", "she told me the price was fine yesterday"),
+        ]
+        for (original, cleaned) in forbidden {
+            s.expectFalse(CleanupGuard.preservesMeaning(original: original, cleaned: cleaned, policy: p),
+                          "meaning changed: \(original) → \(cleaned)")
+        }
+    }
+
+    s.test("grammar repair: a finished job cannot become a promise") { s in
+        let p = CleanupGuard.Policy.grammarRepair
+        // Irregular-verb equivalence plus a free auxiliary drop turned "I HAVE
+        // SENT" into "I WILL SEND". Tense markers must be intact before verb
+        // forms are treated as equivalent.
+        s.expectFalse(CleanupGuard.preservesMeaning(
+            original: "I have sent the report to the client",
+            cleaned: "I will send the report to the client", policy: p))
+        s.expectFalse(CleanupGuard.preservesMeaning(
+            original: "I will send the invoice tomorrow",
+            cleaned: "I sent the invoice tomorrow", policy: p))
+    }
+
+    s.test("grammar repair: agreement is still fixed, time is not moved") { s in
+        let p = CleanupGuard.Policy.grammarRepair
+        // Agreement carries no new information, so it stays allowed…
+        s.expect(CleanupGuard.preservesMeaning(
+            original: "the tests is passing now", cleaned: "the tests are passing now", policy: p))
+        // …while the same auxiliaries moving through time do not.
+        s.expectFalse(CleanupGuard.preservesMeaning(
+            original: "the tests is passing now", cleaned: "the tests was passing now", policy: p))
+    }
+
+    s.test("grammar repair: a contractor's homographs are not verbs") { s in
+        let p = CleanupGuard.Policy.grammarRepair
+        // "saw", "left", "felt" are tools, directions and materials in his work.
+        s.expectFalse(CleanupGuard.preservesMeaning(
+            original: "we need the saw for the deck", cleaned: "we need to see for the deck", policy: p))
+        s.expectFalse(CleanupGuard.preservesMeaning(
+            original: "the panel is on the left side", cleaned: "the panel is on the leave side", policy: p))
+        s.expectFalse(CleanupGuard.preservesMeaning(
+            original: "bring the felt for the table", cleaned: "bring the feel for the table", policy: p))
     }
 
 }

@@ -340,6 +340,10 @@ public actor DictationController {
             languageCode: context.languageCode,
             spokenPunctuationEnabled: context.spokenPunctuationEnabled,
             fastPathEnabled: context.fastPathEnabled,
+            // Carry the user's policy: without it phase two silently fell back to
+            // .verbatim, so the in-place "upgrade" was judged by rules he never
+            // chose and his grammar setting was ignored on that path.
+            guardPolicy: context.guardPolicy,
             cleanupTimeout: 90
         )
         guard let refined = try? await cleanup.clean(raw, context: context),

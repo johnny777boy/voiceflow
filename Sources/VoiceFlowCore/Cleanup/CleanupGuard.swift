@@ -36,25 +36,111 @@ public enum CleanupGuard {
         case grammarRepair
     }
 
-    /// Closed-class English words: they encode structure, not content. A cleanup
-    /// that adds "the" or changes "for"→"in" is fixing grammar; one that adds
-    /// "invoice" is inventing. This set is what separates the two.
-    public static let functionWords: Set<String> = [
-        "a", "an", "the",
-        "of", "to", "in", "for", "on", "with", "at", "by", "from", "into", "onto",
-        "about", "over", "under", "above", "below", "after", "before", "between",
-        "through", "during", "without", "within", "along", "across", "behind",
-        "am", "is", "are", "was", "were", "be", "been", "being",
-        "do", "does", "did", "done", "have", "has", "had", "having",
-        "will", "would", "can", "could", "shall", "should", "may", "might", "must",
-        "and", "but", "or", "nor", "so", "yet", "if", "than", "then", "because",
-        "that", "which", "who", "whom", "whose", "this", "these", "those",
-        "i", "me", "my", "mine", "myself",
-        "you", "your", "yours", "yourself",
-        "he", "him", "his", "she", "her", "hers", "it", "its",
-        "we", "us", "our", "ours", "they", "them", "their", "theirs",
-        "there", "here", "as", "up", "out", "off", "down", "just", "also",
+    /// Closed-class words that carry NO relational meaning: swapping one for
+    /// another cannot change who did what to whom. Only these are freely
+    /// interchangeable.
+    public static let freeFunctionWords: Set<String> = [
+        "a", "an", "the", "this", "these", "those",
+        "that", "which", "who", "whom", "whose",
+        "there", "here", "as", "just", "also", "yet",
     ]
+
+    /// Closed-class words that DO carry meaning, grouped by class.
+    ///
+    /// The first version of this guard treated every function word as
+    /// interchangeable, which was catastrophically wrong: a review demonstrated
+    /// "transfer the deposit TO Bob" → "FROM Bob", "call me BEFORE the meeting"
+    /// → "AFTER", "budget UNDER 50 thousand" → "OVER", "I might" → "I will",
+    /// "I will pay" → "YOU will pay", all accepted. Every one of those changes
+    /// what he said — about money, dates, obligation and who owes whom.
+    ///
+    /// Members of a class may be INSERTED or DELETED (that is grammar), but one
+    /// may never be SUBSTITUTED for another in the same class (that is meaning).
+    static let semanticFunctionClasses: [String: Set<String>] = {
+        let classes: [(String, Set<String>)] = [
+            ("preposition", [
+                "of", "to", "in", "for", "on", "with", "at", "by", "from", "into",
+                "onto", "about", "over", "under", "above", "below", "after",
+                "before", "between", "through", "during", "within", "along",
+                "across", "behind", "up", "out", "off", "down",
+            ]),
+            ("modal", ["can", "could", "shall", "should", "may", "might", "must"]),
+            ("tense", ["will", "would", "have", "has", "had", "having",
+                       "am", "is", "are", "was", "were", "be", "been", "being"]),
+            ("pronoun", [
+                "i", "me", "my", "mine", "myself",
+                "you", "your", "yours", "yourself",
+                "he", "him", "his", "she", "her", "hers", "it", "its",
+                "we", "us", "our", "ours", "they", "them", "their", "theirs",
+            ]),
+            ("conjunction", ["and", "but", "or", "nor", "so", "if", "than", "then", "because"]),
+        ]
+        var map: [String: Set<String>] = [:]
+        for (name, words) in classes {
+            for word in words { map[word] = Set([name]) }
+        }
+        return map
+    }()
+
+    /// Every closed-class word, free or semantic.
+    public static var functionWords: Set<String> {
+        freeFunctionWords.union(semanticFunctionClasses.keys)
+    }
+
+    /// The ONLY substitutions allowed among meaning-bearing words: pure
+    /// agreement, where the swap carries no new information.
+    /// "the tests IS passing" → "ARE passing" is a fix; "IS" → "WAS" is a
+    /// different time and "IS" → "WILL BE" a different commitment, so those
+    /// groups are deliberately kept apart.
+    static let interchangeableGroups: [Set<String>] = [
+        ["am", "is", "are"],      // present-tense agreement
+        ["was", "were"],          // past-tense agreement
+        ["have", "has"],          // present perfect agreement
+        ["do", "does"],           // present auxiliary agreement
+    ]
+
+    /// True when the edit swaps a meaning-bearing word for a different one —
+    /// "to"→"from", "might"→"will", "I"→"you", "is"→"was". Insertions and
+    /// deletions remain fine; it is SUBSTITUTION that changes meaning.
+    static func substitutesMeaningBearingWord(
+        originalWords: [String], cleanedWords: [String]
+    ) -> Bool {
+        let before = Set(originalWords), after = Set(cleanedWords)
+        let removed = before.subtracting(after).filter { semanticFunctionClasses[$0] != nil }
+        let added = after.subtracting(before).filter { semanticFunctionClasses[$0] != nil }
+        guard !removed.isEmpty, !added.isEmpty else { return false }
+        for lost in removed {
+            for gained in added {
+                let agreementOnly = interchangeableGroups.contains {
+                    $0.contains(lost) && $0.contains(gained)
+                }
+                if !agreementOnly { return true }
+            }
+        }
+        return false
+    }
+
+    /// Words that fix a clause in TIME. Their multiset must be unchanged before
+    /// irregular-verb equivalence may be used, or "I HAVE SENT the report"
+    /// becomes "I WILL SEND the report" — a finished job turned into a promise.
+    static let tenseMarkers: Set<String> = [
+        "will", "would", "shall", "have", "has", "had",
+        "am", "is", "are", "was", "were", "be", "been",
+    ]
+
+    static func tenseMarkersUnchanged(_ originalWords: [String], _ cleanedWords: [String]) -> Bool {
+        // Compare by GROUP, so present-tense agreement (is↔are) reads as
+        // unchanged while a genuine time-shift (is→was, have→will) does not.
+        func counted(_ words: [String]) -> [String: Int] {
+            var counts: [String: Int] = [:]
+            for word in words where tenseMarkers.contains(word) {
+                let key = interchangeableGroups.first { $0.contains(word) }?.sorted().joined(separator: "|") ?? word
+                counts[key, default: 0] += 1
+            }
+            return counts
+        }
+        return counted(originalWords) == counted(cleanedWords)
+    }
 
     /// Irregular verbs, grouped so every form of one verb is equivalent to the
     /// others. `sharesStem` cannot see these — "go"/"went" have no letters in
@@ -68,26 +154,26 @@ public enum CleanupGuard {
         ["make", "makes", "made", "making"],
         ["take", "takes", "took", "taken", "taking"],
         ["come", "comes", "came", "coming"],
-        ["see", "sees", "saw", "seen", "seeing"],
+        ["see", "sees", "seen", "seeing"],   // "saw" excluded: he says "the saw"
         ["know", "knows", "knew", "known", "knowing"],
         ["get", "gets", "got", "gotten", "getting"],
         ["give", "gives", "gave", "given", "giving"],
-        ["find", "finds", "found", "finding"],
+        ["find", "finds", "finding"],         // "found" excluded: "found a company"
         ["think", "thinks", "thought", "thinking"],
         ["tell", "tells", "told", "telling"],
         ["become", "becomes", "became", "becoming"],
-        ["leave", "leaves", "left", "leaving"],
-        ["feel", "feels", "felt", "feeling"],
+        ["leave", "leaves", "leaving"],       // "left" excluded: "the left side"
+        ["feel", "feels", "feeling"],         // "felt" excluded: the material
         ["bring", "brings", "brought", "bringing"],
         ["begin", "begins", "began", "begun", "beginning"],
         ["keep", "keeps", "kept", "keeping"],
         ["write", "writes", "wrote", "written", "writing"],
         ["hear", "hears", "heard", "hearing"],
-        ["mean", "means", "meant", "meaning"],
+        ["mean", "meant", "meaning"],         // "means" excluded: "by means of"
         ["meet", "meets", "met", "meeting"],
         ["run", "runs", "ran", "running"],
         ["pay", "pays", "paid", "paying"],
-        ["speak", "speaks", "spoke", "spoken", "speaking"],
+        ["speak", "speaks", "spoken", "speaking"],  // "spoke" excluded: a wheel spoke
         ["lose", "loses", "lost", "losing"],
         ["send", "sends", "sent", "sending"],
         ["build", "builds", "built", "building"],
@@ -158,6 +244,16 @@ public enum CleanupGuard {
         //        an original word ("go"→"going", "discuss"→"discussing").
         let originalWords = allWords(original)
         let originalSet = Set(originalWords)
+        let cleanedAllWords = allWords(cleaned)
+        // Two absolutes for grammar repair, checked before any allowance:
+        // a meaning-bearing closed-class word may never be swapped for another
+        // in its class, and tense markers must be untouched before irregular
+        // verb forms are treated as equivalent.
+        let tenseIntact = tenseMarkersUnchanged(originalWords, cleanedAllWords)
+        if policy == .grammarRepair,
+           substitutesMeaningBearingWord(originalWords: originalWords, cleanedWords: cleanedAllWords) {
+            return false
+        }
         // Only tokens that literally follow an apostrophe in the cleaned text
         // ("don't" → shard "t") are contraction shards — a blanket 1-char pass
         // would let cleanup invent "I"/"a" (Codex verification finding).
@@ -169,8 +265,9 @@ public enum CleanupGuard {
             if word.allSatisfy({ $0.isNumber }) { continue }   // digit sets equal per step 3
             if sharesStem(word, withAnyOf: originalWords) { continue }
             if policy == .grammarRepair {
-                // An irregular form of a verb he actually said is the same verb.
-                if originalWords.contains(where: { sameIrregularVerb(word, $0) }) { continue }
+                // An irregular form of a verb he actually said is the same verb —
+                // but only while the clause's tense is untouched.
+                if tenseIntact, originalWords.contains(where: { sameIrregularVerb(word, $0) }) { continue }
                 // A function word may be introduced, but only within the budget:
                 // structure is free to fix, content is never free to invent.
                 if functionWords.contains(word), insertionsUsed < budget {
@@ -190,7 +287,7 @@ public enum CleanupGuard {
             if TextNormalizer.fillerWords.contains(word) { continue }
             if sharesStem(word, withAnyOf: cleanedWords) { continue }
             if policy == .grammarRepair {
-                if cleanedWords.contains(where: { sameIrregularVerb(word, $0) }) { continue }
+                if tenseIntact, cleanedWords.contains(where: { sameIrregularVerb(word, $0) }) { continue }
                 // Dropping a function word is a grammar fix ("interesting FOR
                 // discuss" → "interested IN discussing"); dropping a content word
                 // is losing what he said, and stays forbidden.
@@ -302,40 +399,74 @@ public enum CleanupGuard {
         if preservesMeaning(original: original, cleaned: cleaned, policy: policy) {
             return cleaned
         }
-        let originalSentences = sentences(original)
-        let cleanedSentences = sentences(cleaned)
-        guard originalSentences.count == cleanedSentences.count,
-              originalSentences.count > 1 else {
+        let originalPieces = sentencePieces(original)
+        let cleanedPieces = sentencePieces(cleaned)
+        guard originalPieces.count == cleanedPieces.count,
+              originalPieces.count > 1 else {
             return original
         }
         var kept = 0
-        var merged: [String] = []
-        for (before, after) in zip(originalSentences, cleanedSentences) {
-            if preservesMeaning(original: before, cleaned: after, policy: policy) {
-                merged.append(after)
+        var merged = ""
+        for (before, after) in zip(originalPieces, cleanedPieces) {
+            let accepted = preservesMeaning(
+                original: before.sentence, cleaned: after.sentence, policy: policy)
+            merged += accepted ? after.sentence : before.sentence
+            // The ORIGINAL's separator always wins, so paragraph breaks the user
+            // dictated survive regardless of what the model did with them.
+            merged += before.separator
+            // Only a sentence with actual words counts as a repair kept — a bare
+            // "." pseudo-sentence trivially "passes" and must not make the merge
+            // path look successful.
+            if accepted, !allWords(before.sentence).isEmpty, before.sentence != after.sentence {
                 kept += 1
-            } else {
-                merged.append(before)
             }
         }
-        return kept == 0 ? original : merged.joined(separator: " ")
+        return kept == 0 ? original : merged
     }
 
-    /// Split into sentences, keeping terminal punctuation with its sentence.
-    static func sentences(_ text: String) -> [String] {
-        var out: [String] = []
+    /// Split into sentences WITH the whitespace that followed each, so the text
+    /// can be rebuilt byte-for-byte.
+    ///
+    /// Rejoining tokens with a single space corrupted the source: "3.14" became
+    /// "3. 14", "e.g." became "e. g.", and blank lines between paragraphs (which
+    /// email mode is required to preserve) vanished. A period is only a sentence
+    /// end when it is not inside a number, not part of a short abbreviation, and
+    /// not one of a run of dots.
+    static func sentencePieces(_ text: String) -> [(sentence: String, separator: String)] {
+        let chars = Array(text)
+        var pieces: [(String, String)] = []
         var current = ""
-        for ch in text {
+        var index = 0
+        while index < chars.count {
+            let ch = chars[index]
             current.append(ch)
-            if ch == "." || ch == "!" || ch == "?" {
-                let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty { out.append(trimmed) }
-                current = ""
+            index += 1
+            guard ch == "." || ch == "!" || ch == "?" else { continue }
+            if ch == "." {
+                let next = index < chars.count ? chars[index] : " "
+                if next.isNumber || next == "." { continue }          // 3.14, ellipsis
+                // "e.g." / "p.m.": a 1-2 letter run preceded by another dot.
+                let body = Array(current.dropLast())
+                var letterRun = 0
+                var scan = body.count - 1
+                while scan >= 0, body[scan].isLetter { letterRun += 1; scan -= 1 }
+                if letterRun >= 1, letterRun <= 2, scan >= 0, body[scan] == "." { continue }
             }
+            var separator = ""
+            while index < chars.count, chars[index].isWhitespace {
+                separator.append(chars[index]); index += 1
+            }
+            pieces.append((current, separator))
+            current = ""
         }
-        let tail = current.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !tail.isEmpty { out.append(tail) }
-        return out
+        if !current.isEmpty { pieces.append((current, "")) }
+        return pieces
+    }
+
+    /// Sentence text only — for callers that don't need to rebuild the source.
+    static func sentences(_ text: String) -> [String] {
+        sentencePieces(text).map { $0.sentence.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
     }
 
 }
