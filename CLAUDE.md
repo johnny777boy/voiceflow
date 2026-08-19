@@ -26,9 +26,21 @@ Xcode, no XCTest; tests are the executable `swift run VoiceFlowTests`). The bar 
    invariants to attack, build/test commands, accepted tradeoffs NOT to flag),
    give Yoni a short paste-message, and wait for his pasted PASS verdict.
    Fix every Critical/Important finding before merging.
-5. **Merging:** tag main first (`pre-<thing>-merge-YYYY-MM-DD`), `git merge
-   --no-ff`, run tests on the merge, tag `verified-YYYY-MM-DD-<thing>`, push with
-   tags, rebuild + reinstall the app from main.
+5. **Merging (Yoni's sequence, confirmed 2026-08-18 — do not shortcut it):**
+   branch → build → install (`Scripts/install_app.sh`, auto-archives) → Yoni
+   lives on it → reviewer agents → Codex PASS → **push the branch** →
+   tag main (`pre-<thing>-merge-YYYY-MM-DD`) → `git merge --no-ff` → run tests on
+   the merge → tag `verified-YYYY-MM-DD-<thing>` → push main with tags → rebuild +
+   reinstall from main. **NEVER commit to `main` directly.** Pushing the branch
+   before the merge is deliberate: the work is backed up off the machine and
+   reviewable on GitHub before it can affect `main`.
+
+   **Corollary learned the hard way (2026-08-18):** `main` is only a safe
+   fallback while it is CURRENT. It sat 8 days stale with a silently dead
+   Whisper engine, so "reinstall from main" had become a downgrade. If a branch
+   fixes something the user depends on, merging is urgent — an unmerged fix means
+   the safety net is broken. Rollback = the previous ARCHIVED BUILD
+   (`Scripts/rollback_app.sh`), never assumed to be main.
 6. **NEVER change the audio-capture path blind** (tap, formats, preroll, drain,
    voice-processing). Twice it broke things unverifiable without a mic. Audio
    changes happen only with Yoni present, verified live + by WER.
