@@ -215,6 +215,22 @@ public final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         // tighten logProbThreshold below the -1.0 default — that converts marginal
         // accented clips into random high-temperature resampling.
         options.temperatureFallbackCount = 1
+        // WhisperKit 1.1.0 ships firstTokenLogProbThreshold = -1.5 and ABORTS
+        // the whole window's decode when the first token is uncertain — and an
+        // accented first word is uncertain by definition. Research round 2
+        // flagged this as a candidate mechanism for the missing-words class.
+        // nil disables the abort; dev switches let the bench A/B it without a
+        // rebuild. Defaults chosen by measurement on his corpus (2026-08-20).
+        if let raw = UserDefaults.standard.string(forKey: "whisperFirstTokenThreshold"),
+           let value = Float(raw) {
+            options.firstTokenLogProbThreshold = value
+        } else {
+            options.firstTokenLogProbThreshold = nil
+        }
+        if let raw = UserDefaults.standard.string(forKey: "whisperFallbackCount"),
+           let value = Int(raw) {
+            options.temperatureFallbackCount = value
+        }
         options.skipSpecialTokens = true
         options.suppressBlank = true      // keep [BLANK_AUDIO]-style tokens out on quiet clips
         // NOTE: options.noSpeechThreshold is DEAD CONFIG in WhisperKit v0.18.0 —
