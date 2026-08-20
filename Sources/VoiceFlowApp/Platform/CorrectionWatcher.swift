@@ -52,8 +52,20 @@ final class CorrectionWatcher {
         // `AX.focusedElement` returns a timeout-bounded element: these reads run
         // on the main actor, and an unresponsive app would otherwise freeze the
         // whole UI for the AX default of six seconds per call.
+        // Electron/Chromium apps keep their AX tree off until asked — ask, so
+        // his edits in Claude/Slack/chat apps become visible like everywhere
+        // else. (Measured blind spot: 0 of 40 corrections seen in Claude.)
+        if let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier {
+            AX.enableManualAccessibility(pid: pid)
+        }
         guard let element = AX.focusedElement(), !Self.isSecure(element) else { return }
-        guard let before = AX.string(element, kAXValueAttribute) else { return }   // AX-blind field
+        var initial = AX.string(element, kAXValueAttribute)
+        if initial == nil {
+            // First enable on a Chromium app: the tree needs a beat to build.
+            usleep(400_000)
+            initial = AX.focusedElement().flatMap { AX.string($0, kAXValueAttribute) }
+        }
+        guard let before = initial else { return }   // genuinely AX-blind field
         let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         let armedAt = Date()
 
