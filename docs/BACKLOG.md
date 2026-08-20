@@ -2,6 +2,15 @@
 
 ## ▶️ RESUME HERE (2026-08-19)
 
+
+**PROOF IN ONE COMMAND (2026-08-19):** `swift run VoiceFlowReplay --prove`
+runs 12 dangerous edits through the REAL guard and prints plain-English
+verdicts — 9 that must be blocked (severed clause, deleted word, invented word,
+flipped negation, changed number, reversed debt, swapped preposition,
+might→will) and 3 that must still be allowed. Against the pre-`424ef4a` guard it
+reports **2 FAILED**; against HEAD, all 12 correct. This is the answer to "how
+do we know it is working" for the SAFETY half — the accuracy half still needs
+`Scripts/wer_session.sh`.
 **Yoni says on return:** *"Continue VoiceFlow — read the RESUME HERE section."*
 
 **State:** branch `feature/latency-instrumentation` (folder `VoiceFlow-accuracy`),
