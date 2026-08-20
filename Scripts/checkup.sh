@@ -23,6 +23,9 @@ rows = list(con.execute(
 if not rows:
     print(f"\n{B}Nothing dictated since the last check-up.{O} Nothing to judge.\n"); sys.exit(0)
 n = len(rows)
+if n < 10:
+    print(f"\n{B}Only {n} dictations since the last check-up{O} — too few to grade fairly.")
+    print("Keep dictating and run this again after a real day of use.\n"); sys.exit(0)
 first = datetime.datetime.fromtimestamp(rows[0][5]).strftime("%b %d")
 whisper = sum(1 for r in rows if r[2] == "whisper")
 edited = sum(1 for r in rows if r[4])
