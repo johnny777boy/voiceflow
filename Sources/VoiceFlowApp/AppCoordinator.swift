@@ -163,7 +163,9 @@ final class AppCoordinator: ObservableObject {
             history: store,
             settings: loaded,
             screenContext: AXScreenContextProvider(),
-            cleanupAudit: cleanupAudit
+            cleanupAudit: cleanupAudit,
+            confusions: PersonalConfusionsStore(
+                url: AppPaths.baseDirectory().appendingPathComponent("personal-confusions.json"))
         )
     }
 

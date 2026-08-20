@@ -336,3 +336,77 @@ func runPersonalConfusionTests(_ s: TestSuite) {
         s.expect(table.apply(to: text).isEmpty)
     }
 }
+
+/// The system noticing its own mistakes from HIS natural behaviour (2026-08-20).
+/// When a dictation comes out wrong he does not file a report — he says it
+/// again. Two near-identical dictations in a short window: the second is the
+/// correction of the first, and the difference between them is the error.
+func runRedictationTests(_ s: TestSuite) {
+
+    s.test("redictation: saying it again is recognised as a correction") { s in
+        // His live pattern from 2026-08-19: a garbled attempt, then the same
+        // sentence again seconds later.
+        let verdict = RedictationDetector.judge(
+            previous: "We need to dig and you walk behind the garage",
+            current: "We need to dig a new well behind the garage",
+            secondsApart: 14)
+        s.expect(verdict != nil, "an immediate re-dictation must be recognised")
+        s.expectEqual(verdict?.confusions.first?.heard, "and you walk")
+        s.expectEqual(verdict?.confusions.first?.said, "a new well")
+    }
+
+    s.test("redictation: unrelated consecutive dictations are NOT corrections") { s in
+        // He dictates different sentences all day; treating succession as
+        // correction would learn garbage confusions from ordinary work.
+        s.expectNil(RedictationDetector.judge(
+            previous: "Send the invoice to the client before Friday",
+            current: "The framing is okay but the beam is load bearing",
+            secondsApart: 20))
+    }
+
+    s.test("redictation: identical repeats teach nothing") { s in
+        // Saying the same thing twice (it inserted into the wrong field, he
+        // repeated it) contains no correction signal.
+        s.expectNil(RedictationDetector.judge(
+            previous: "Send the invoice to the client",
+            current: "Send the invoice to the client",
+            secondsApart: 10))
+    }
+
+    s.test("redictation: too much time apart means a new thought, not a fix") { s in
+        s.expectNil(RedictationDetector.judge(
+            previous: "We need to dig and you walk behind the garage",
+            current: "We need to dig a new well behind the garage",
+            secondsApart: 600))
+    }
+
+    s.test("redictation: a short fragment then the full sentence is a correction") { s in
+        // The other live pattern: "We need." (cut off) then the whole sentence.
+        let verdict = RedictationDetector.judge(
+            previous: "We need.",
+            current: "We need to dig a new well behind the garage",
+            secondsApart: 8)
+        s.expect(verdict != nil, "an aborted fragment followed by the full sentence is a retry")
+        // A fragment retry has no word-level confusions to learn — the signal
+        // is the retry itself (a truncation event), not a substitution.
+        s.expect(verdict?.confusions.isEmpty ?? false)
+    }
+
+    s.test("redictation: mined confusions accumulate sightings across days") { s in
+        var rules: [PersonalConfusions.Rule] = []
+        for _ in 0..<2 {
+            if let v = RedictationDetector.judge(
+                previous: "we want to wrench it out for the year",
+                current: "we want to rent it out for the year",
+                secondsApart: 12) {
+                for c in v.confusions {
+                    rules = PersonalConfusions.learning(rules, heard: c.heard, said: c.said)
+                }
+            }
+        }
+        s.expectEqual(rules.first?.sightings, 2)
+        s.expectEqual(PersonalConfusions(rules: rules)
+            .apply(to: "we want to wrench it out for the year").text,
+            "we want to rent it out for the year")
+    }
+}

@@ -29,6 +29,11 @@ public actor DictationController {
     /// Where the cleanup stage writes what it proposed and what became of it, so
     /// history can answer "did the guard throw away the polish?" (2026-08-19).
     private let cleanupAudit: CleanupAuditLog?
+    /// Mined re-dictation corrections (see RedictationDetector). Observation
+    /// only — nothing applies these until the application guards land.
+    private let confusions: PersonalConfusionsStore?
+    /// The previous delivered dictation, for re-dictation comparison.
+    private var lastDelivered: (text: String, at: Date)?
     private let inserter: TextInserting
     private let activeApp: ActiveAppProviding
     private let history: HistoryStoring
@@ -90,7 +95,8 @@ public actor DictationController {
         settings: AppSettings = .default,
         time: TimeSource = SystemTimeSource(),
         screenContext: ScreenContextProviding? = nil,
-        cleanupAudit: CleanupAuditLog? = nil
+        cleanupAudit: CleanupAuditLog? = nil,
+        confusions: PersonalConfusionsStore? = nil
     ) {
         self.audio = audio
         self.transcriber = transcriber
@@ -102,6 +108,7 @@ public actor DictationController {
         self.time = time
         self.screenContext = screenContext
         self.cleanupAudit = cleanupAudit
+        self.confusions = confusions
     }
 
     public func updateSettings(_ newValue: AppSettings) {
@@ -308,6 +315,21 @@ public actor DictationController {
             errorMessage: outcome.note ?? plan.note,
             createdAt: time.date()
         )
+
+        // HIS ERROR REPORT IS SAYING IT AGAIN. Two near-identical dictations
+        // moments apart: the second corrects the first, and their difference is
+        // what the recogniser got wrong. Mined silently; never applied here.
+        if let previous = lastDelivered {
+            let gap = record.createdAt.timeIntervalSince(previous.at)
+            if let verdict = RedictationDetector.judge(
+                previous: previous.text, current: raw, secondsApart: gap) {
+                for pair in verdict.confusions {
+                    confusions?.record(heard: pair.heard, said: pair.said)
+                    Log.transcription.notice("Re-dictation correction observed (\(pair.heard.count, privacy: .public)→\(pair.said.count, privacy: .public) chars)")
+                }
+            }
+        }
+        lastDelivered = (raw, record.createdAt)
 
         if settings.historyEnabled {
             try? history.save(record)
