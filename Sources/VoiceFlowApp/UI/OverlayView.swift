@@ -62,6 +62,9 @@ struct OverlayView: View {
             Image(systemName: "flag.fill")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(Color(red: 0.35, green: 0.85, blue: 0.5))
+        case .unflagged:
+            Image(systemName: "flag.slash")
+                .font(.system(size: 15, weight: .semibold)).foregroundStyle(.secondary)
         }
     }
 
@@ -72,6 +75,7 @@ struct OverlayView: View {
         case .done(let r): return r.outcome.didInsert ? "Inserted" : "Copied to clipboard"
         case .error:      return "Try again"
         case .flagged:    return "Got it — marked as wrong"
+        case .unflagged:  return "Unmarked — it was fine"
         }
     }
 }

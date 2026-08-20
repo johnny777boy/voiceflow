@@ -23,6 +23,8 @@ final class OverlayController {
         case error(String)
         /// The ⌃⌃ flag ack: "heard you — that one is marked wrong."
         case flagged
+        /// ⌃⌃ again: the mark is removed.
+        case unflagged
     }
 
     let model = OverlayModel()
@@ -44,7 +46,7 @@ final class OverlayController {
             let work = DispatchWorkItem { [weak self] in self?.hide() }
             hideWorkItem = work
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.6, execute: work)
-        case .error, .flagged:
+        case .error, .flagged, .unflagged:
             // Long enough to look up from the keyboard: he tapped the flag key
             // twice, was told "it worked" for 1.6 seconds at the bottom of the
             // screen, and saw none of it. Confirmations must outlive the glance.

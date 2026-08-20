@@ -422,8 +422,12 @@ func runFlagWrongTests(_ s: TestSuite) {
         var r = TranscriptRecord(rawText: "we need to dig", cleanText: "we need to dig",
                                  mode: .cleanWriting)
         try store.save(r)
-        try store.setFlaggedWrong(id: r.id)
+        try store.setFlaggedWrong(true, id: r.id)
         s.expect(try store.record(id: r.id)?.flaggedWrong == true)
+        // The same gesture undoes it — a test or an accident must be reversible.
+        try store.setFlaggedWrong(false, id: r.id)
+        s.expect(try store.record(id: r.id)?.flaggedWrong == false)
+        try store.setFlaggedWrong(true, id: r.id)
         // Reopen: the flag survives, old rows default to false.
         r = TranscriptRecord(rawText: "fine", cleanText: "fine", mode: .cleanWriting)
         try store.save(r)

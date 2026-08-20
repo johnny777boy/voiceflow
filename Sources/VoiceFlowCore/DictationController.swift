@@ -113,14 +113,18 @@ public actor DictationController {
         self.confusions = confusions
     }
 
-    /// The one-key error report: mark the most recent dictation as wrong.
-    /// Returns its text so the caller can confirm WHAT was flagged, or nil when
-    /// there is nothing to flag.
-    public func flagLastDictation() -> String? {
+    /// The one-key error report, as a TOGGLE: first ⌃⌃ marks the most recent
+    /// dictation wrong; ⌃⌃ again un-marks it. He asked for exactly this the
+    /// first time he flagged a dictation that was actually fine — a test or an
+    /// accident must be reversible by the same gesture that made it.
+    /// Returns the flag state after the toggle, or nil when there is nothing
+    /// to flag yet.
+    public func flagLastDictation() -> Bool? {
         guard let id = lastRecordID else { return nil }
-        try? history.setFlaggedWrong(id: id)
-        Log.transcription.notice("User flagged the last dictation as WRONG")
-        return lastDelivered?.text
+        let nowFlagged = !((try? history.record(id: id))?.flaggedWrong ?? false)
+        try? history.setFlaggedWrong(nowFlagged, id: id)
+        Log.transcription.notice("User \(nowFlagged ? "flagged" : "UN-flagged", privacy: .public) the last dictation")
+        return nowFlagged
     }
 
     public func updateSettings(_ newValue: AppSettings) {
