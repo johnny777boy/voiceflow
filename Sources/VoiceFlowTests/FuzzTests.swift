@@ -234,9 +234,29 @@ func runLeadingSilenceTests(_ s: TestSuite) {
         s.expectEqual(LeadingSilence.trimmed(short, sampleRate: rate).count, short.count)
     }
 
-    s.test("silence: audio is never removed from the middle or the end") { s in
+    s.test("silence: the dead air AFTER he stops is removed too") { s in
+        // LIVE, 2026-08-20: one second of trailing silence on a 32-second
+        // dictation made Whisper append "Thank you." — on the very dictation
+        // where he was telling me the app invents words. Removing the second
+        // removed the phantom.
+        let clip = speech(3) + silence(1.5)
+        let out = LeadingSilence.trimmed(clip, sampleRate: rate)
+        let removed = Double(clip.count - out.count) / rate
+        s.expect(removed > 1.0 && removed < 1.4,
+                 "removed \(removed)s — should be the tail minus the 0.3s lead-out")
+    }
+
+    s.test("silence: a lead-out is kept so a trailing consonant survives") { s in
+        let clip = speech(2) + silence(2)
+        let out = LeadingSilence.trimmed(clip, sampleRate: rate)
+        let kept = Double(out.count) / rate - 2.0
+        s.expect(kept >= 0.25, "kept only \(kept)s after speech — a final 't' would be clipped")
+    }
+
+    s.test("silence: audio is never removed from the middle") { s in
         // A pause mid-sentence is speech, not dead air, and the end is where a
         // trailing word lives.
+        // A pause mid-sentence is speech, not dead air.
         let clip = silence(1.5) + speech(1) + silence(1.2) + speech(1.5)
         let out = LeadingSilence.trimmed(clip, sampleRate: rate)
         let expected = clip.count - (Int(rate * 1.5) - Int(rate * LeadingSilence.leadInSeconds))

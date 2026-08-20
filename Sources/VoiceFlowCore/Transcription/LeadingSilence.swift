@@ -1,6 +1,6 @@
 import Foundation
 
-/// Trims the dead air before the user starts speaking.
+/// Trims the dead air around what the user actually said.
 ///
 /// MEASURED 2026-08-19, on his own recordings. Every clip carried 1.6–2.7
 /// seconds of near-silence at the front — he holds the key, then begins. Whisper
@@ -30,6 +30,18 @@ public enum LeadingSilence {
     /// Where speech begins, in samples, or nil when the clip never rises above
     /// its own noise floor.
     public static func onset(_ samples: [Float], sampleRate: Double) -> Int? {
+        guard let (frames, frame, threshold) = profile(samples, sampleRate: sampleRate) else { return nil }
+        for (index, value) in frames.enumerated() where value > threshold {
+            let next = index + 1 < frames.count ? frames[index + 1] : value
+            if next > threshold * 0.5 { return index * frame }
+        }
+        return nil
+    }
+
+    /// Per-frame loudness, the frame size, and the level speech must clear.
+    private static func profile(
+        _ samples: [Float], sampleRate: Double
+    ) -> (frames: [Float], frame: Int, threshold: Float)? {
         let frame = max(1, Int(sampleRate * 0.01))          // 10 ms
         guard samples.count > frame * 4 else { return nil }
         func rms(_ range: Range<Int>) -> Float {
@@ -54,21 +66,47 @@ public enum LeadingSilence {
         // that is all noise or all speech.
         let threshold = max(floor * 4, peak * 0.12)
         guard threshold > 0 else { return nil }
-        for (index, value) in frames.enumerated() where value > threshold {
-            // Require the level to persist, so one click or breath is not an onset.
-            let next = index + 1 < frames.count ? frames[index + 1] : value
-            if next > threshold * 0.5 { return index * frame }
+        return (frames, frame, threshold)
+    }
+
+    /// Kept after the last speech, so a trailing consonant is never clipped.
+    public static let leadOutSeconds: Double = 0.3
+
+    /// Where speech ends, in samples, or nil when nothing rises above the floor.
+    public static func offset(_ samples: [Float], sampleRate: Double) -> Int? {
+        guard let (frames, frame, threshold) = profile(samples, sampleRate: sampleRate) else { return nil }
+        for (index, value) in frames.enumerated().reversed() where value > threshold {
+            let previous = index > 0 ? frames[index - 1] : value
+            if previous > threshold * 0.5 { return min(samples.count, (index + 1) * frame) }
         }
         return nil
     }
 
-    /// `samples` with the leading dead air removed, or unchanged when there is
-    /// nothing worth removing.
+    /// `samples` with the dead air at BOTH ends removed, or unchanged when there
+    /// is nothing worth removing.
+    ///
+    /// The trailing half matters as much as the leading one, and for the same
+    /// reason. MEASURED on his own 32-second dictation, 2026-08-20: one second
+    /// of silence at the end made Whisper append "Thank you." — two words he
+    /// never said, on the dictation where he was telling me the app invents
+    /// words. Removing that second removed the phantom and changed nothing else.
+    ///
+    /// This is the documented Whisper failure (YouTube-outro boilerplate learned
+    /// from training data, emitted over silence), and the existing phantom filter
+    /// could not catch it: that one only fires when the WHOLE transcript is a
+    /// known phrase, never when one is appended to real speech.
     public static func trimmed(_ samples: [Float], sampleRate: Double) -> [Float] {
-        guard let onset = onset(samples, sampleRate: sampleRate) else { return samples }
-        let leadIn = Int(sampleRate * leadInSeconds)
-        let cut = onset - leadIn
-        guard cut > Int(sampleRate * minimumTrimSeconds) else { return samples }
-        return Array(samples[cut...])
+        var start = 0
+        var end = samples.count
+        if let onset = onset(samples, sampleRate: sampleRate) {
+            let cut = onset - Int(sampleRate * leadInSeconds)
+            if cut > Int(sampleRate * minimumTrimSeconds) { start = cut }
+        }
+        if let offset = offset(samples, sampleRate: sampleRate) {
+            let cut = min(samples.count, offset + Int(sampleRate * leadOutSeconds))
+            if samples.count - cut > Int(sampleRate * minimumTrimSeconds) { end = cut }
+        }
+        guard start < end, start > 0 || end < samples.count else { return samples }
+        return Array(samples[start..<end])
     }
 }
