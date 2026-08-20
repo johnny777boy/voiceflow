@@ -38,10 +38,17 @@ final class OverlayController {
         switch state {
         case .recording, .processing:
             break
-        case .done, .error:
+        case .done:
             let work = DispatchWorkItem { [weak self] in self?.hide() }
             hideWorkItem = work
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.6, execute: work)
+        case .error:
+            // Long enough to look up from the keyboard: he tapped the flag key
+            // twice, was told "it worked" for 1.6 seconds at the bottom of the
+            // screen, and saw none of it. Confirmations must outlive the glance.
+            let work = DispatchWorkItem { [weak self] in self?.hide() }
+            hideWorkItem = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4.0, execute: work)
         }
     }
 
