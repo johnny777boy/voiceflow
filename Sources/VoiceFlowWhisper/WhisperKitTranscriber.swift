@@ -175,7 +175,7 @@ public final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         // whole clip's loudest moment either way. Kill switch, because this is
         // the audio path:
         //   defaults write com.voiceflow.dictation trimLeadingSilence -bool NO
-        let trimLeading = UserDefaults.standard.object(forKey: "trimLeadingSilence") as? Bool ?? true
+        let trimLeading = DevSwitch.isOn("trimLeadingSilence")
         let samples = trimLeading
             ? LeadingSilence.trimmed(loaded, sampleRate: 16_000)
             : loaded
@@ -226,7 +226,16 @@ public final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         options.suppressTokens = suppress   // typo `supressTokens` was fixed upstream in v1.0.0
         options.withoutTimestamps = true
         options.wordTimestamps = false
-        options.chunkingStrategy = ChunkingStrategy.none
+        // Long dictations lose their punctuation, and the cause is here.
+        // MEASURED across 200 of his real dictations, 2026-08-20:
+        //   1-40 words in  -> 11.5-word sentences out
+        //   151+ words in  -> 69.7-word sentences out
+        // Whisper works natively in 30-second windows; handing it 90 seconds in
+        // one piece degrades exactly as that table shows. VAD chunking splits on
+        // silence and decodes each window with full context, which is what the
+        // model was built to receive.
+        let chunkLong = DevSwitch.isOn("whisperVADChunking")
+        options.chunkingStrategy = chunkLong ? ChunkingStrategy.vad : ChunkingStrategy.none
 
         // Context biasing: the user's vocabulary + proper nouns read off the
         // frontmost window. Verified against the pinned WhisperKit 0.18.0
@@ -256,7 +265,7 @@ public final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         // Still fully reversible, because this is the decode path:
         //   defaults write com.voiceflow.dictation whisperPromptBiasingEnabled -bool NO
         var promptWasFed = false
-        let biasingEnabled = UserDefaults.standard.object(forKey: "whisperPromptBiasingEnabled") as? Bool ?? true
+        let biasingEnabled = DevSwitch.isOn("whisperPromptBiasingEnabled")
         if biasingEnabled,
            let tokenizer = wk.tokenizer,
            let prompt = Self.promptTokens(for: context, tokenizer: tokenizer) {
