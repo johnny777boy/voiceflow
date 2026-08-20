@@ -18,7 +18,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CORPUS="$HOME/Library/Application Support/VoiceFlow/Benchmark"
 OUT="$HOME/Library/Application Support/VoiceFlow/Benchmark-results"
-REF="$ROOT/docs/wer-reference-long.txt"
+REF="${BENCH_REF:-$ROOT/docs/wer-reference-long.txt}"   # measure.sh overrides for a partial session
 ENTITIES="$ROOT/docs/wer-entities.txt"
 TURBO="openai_whisper-large-v3-v20240930_turbo"
 LARGE="openai_whisper-large-v3"           # 32 decoder layers = the REAL full model
