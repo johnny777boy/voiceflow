@@ -628,6 +628,34 @@ accent, and even Wispr slips on them:
 Use **Clean Writing** mode (auto-mode picks it). Whisper toggle is OFF (stable Apple
 engine). ~93–95% accuracy on clear speech; the accent tail is the ceiling until Item #1.
 
+## ✅ 2026-08-19 LATE — THE CAUSE WAS LEADING SILENCE, and the fix is live
+
+Every recording of his begins with 1.6-2.7s of near-silence (he holds the key,
+then speaks). Whisper mis-decodes and hallucinates on that. `LeadingSilence`
+trims it — front only, 200ms lead-in kept, threshold from each clip's own noise
+floor, all-silence clips returned whole. Kill switch `trimLeadingSilence`.
+
+**Verified LIVE on his voice, after installing:**
+
+| sentence | before tonight | Wispr Flow | after the fix |
+|---|---|---|---|
+| "Ask Codex to verify the branch…" | 66.7% | 25.0% | **16.7% — we now BEAT Wispr** |
+| "We need to dig a new well…" | 35.3% | **0.0%** | 17.6% (halved, still behind) |
+
+Sentence 1 recovered "Ask/to/the/we/it" and stopped inventing "Thank you" — the
+complaint that began the whole investigation. Batch of eight, offline through the
+production path: 18.97% -> 13.79%.
+
+**THE REMAINING GAP IS NARROW AND NAMED.** Sentence 3 fails on exactly three
+words: "a new well" -> "and you walk". Everything around it is perfect, and Wispr
+gets it. That is a phonetically hard run in his voice and precisely what CONTEXT
+BIASING is for — "well" is trade vocabulary, and biasing is built, proven working
+and shipping OFF. **Next experiment: biasing on his archived audio, scored
+against this baseline.** No new recording needed — the audio is archived.
+
+**Do NOT re-open:** the model (full large-v3 changed nothing on identical audio)
+and capture level (peak-normalising scored identically). Both measured, both dead.
+
 ## 📊 2026-08-19 — THE FIRST REAL NUMBER, and it refutes the day's main theory
 
 Eight sentences, read into VoiceFlow and then into Wispr Flow, scored against the
