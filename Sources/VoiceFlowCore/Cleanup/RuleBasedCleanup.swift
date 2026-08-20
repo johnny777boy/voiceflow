@@ -21,6 +21,13 @@ public struct RuleBasedCleanup: CleanupProviding {
             return TextNormalizer.normalizeWhitespace(rawText)
         }
 
+        // Stutters are deterministic and unit-tested, but they DELETE a word, so
+        // they run only once the verbatim path above has returned. They used to
+        // run before it, which meant Raw mode — the mode a WER benchmark uses,
+        // and the mode that promises not one word changed — silently dropped
+        // repeats.
+        let rawText = TextNormalizer.collapseStutters(rawText)
+
         // 1. Vocabulary substitution (user's spoken→written mappings).
         let replacer = VocabularyReplacer(entries: context.vocabulary)
         var text = replacer.apply(to: rawText)

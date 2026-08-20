@@ -16,9 +16,56 @@ public enum TextNormalizer {
     /// NOTE: "er", "err", and "ah" are deliberately NOT here — matching is
     /// case-insensitive, so they destroyed the real words "ER" (emergency room),
     /// "err" ("to err is human"), and the interjection "ah" ("ah, I see").
+    /// Filled pauses — the ONLY class of disfluency that is unconditionally safe
+    /// to delete, because it has no semantic content by definition. This matches
+    /// NIST SCTK's `%HESITATION` class and the filler list shipped by VoiceInk,
+    /// the leading open-source Mac competitor.
+    ///
+    /// Words like "like", "well", "okay", "right", "so", "actually" are NOT here
+    /// and must not be added. Research on the Switchboard corpus found human
+    /// annotators could not agree on them (κ 0.40–0.43), the stylebook abandoned
+    /// "actually" as unmarkable mid-project, and automatic detection of
+    /// discourse-"like" tops out near 79% precision — one deletion in five wrong.
+    /// In this user's work they are load-bearing: "dig a new WELL", "the framing
+    /// is OKAY", "he was SERIOUSLY injured", "turn RIGHT at the corner".
     public static let fillerWords: Set<String> = [
-        "um", "uh", "uhh", "umm", "uhm", "erm", "hmm", "mhm"
+        "um", "uh", "uhh", "umm", "uhm", "erm", "hmm", "mhm", "mmm"
     ]
+    // NOT added, and the existing suite proved why: "er" would eat the ER in
+    // "the ER doctor", and "mm" would eat the unit in "50 mm trim". Even the
+    // supposedly-safe class needs checking against what this user actually says.
+
+    /// Collapse a stutter: an immediately repeated CLOSED-CLASS word, "the the"
+    /// → "the". Restricted to function words on purpose — repeated open-class
+    /// words are usually deliberate ("very very careful", "no no no"), and this
+    /// runs before the model sees the text so it must never guess.
+    public static func collapseStutters(_ text: String) -> String {
+        let closedClass: Set<String> = [
+            "the", "a", "an", "and", "or", "but", "of", "to", "in", "for", "on",
+            "with", "at", "by", "from", "is", "are", "was", "were", "i", "you",
+            "he", "she", "it", "we", "they", "that", "this", "so", "my", "your",
+        ]
+        let tokens = text.split(separator: " ", omittingEmptySubsequences: false)
+        var out: [Substring] = []
+        for token in tokens {
+            let bare = token.lowercased().filter { $0.isLetter }
+            if let previous = out.last {
+                let previousBare = previous.lowercased().filter { $0.isLetter }
+                // A word that ENDS a sentence is not the first half of a
+                // stutter. Stripping punctuation before comparing made "It is
+                // up to you. You decide." lose its second subject — a deleted
+                // word, in the one edit that has no guard above it (CleanupGuard
+                // only ever sees the already-collapsed text).
+                let previousEndsSentence = previous.last.map { ".!?:;,".contains($0) } ?? false
+                if !bare.isEmpty, bare == previousBare, closedClass.contains(bare),
+                   !previousEndsSentence {
+                    continue   // drop the repeat, keep the first
+                }
+            }
+            out.append(token)
+        }
+        return out.joined(separator: " ")
+    }
 
     /// Collapse runs of whitespace to single spaces and trim ends. Newlines are
     /// preserved (collapsed to single `\n`).
@@ -103,9 +150,24 @@ public enum TextNormalizer {
     /// text:"). Only matches when a cleaning keyword (cleaned/corrected/…) is present,
     /// so genuine content like "Here is the plan:" is left untouched.
     public static func stripLLMPreamble(_ text: String) -> String {
+        var text = text
         let pattern = "^\\s*(sure[,.]?\\s+)?(here'?s?\\s+(is\\s+)?)?(the\\s+)?(cleaned|corrected|polished|revised|edited)([ -]?up)?\\s+(text|version|transcript|sentence)\\s*:\\s*"
         if let r = text.range(of: pattern, options: [.regularExpression, .caseInsensitive]) {
-            return String(text[r.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            text = String(text[r.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        // Strip a wrapping code fence. Apple's on-device model is documented to
+        // leak markdown — MacWhisper shipped a release specifically for
+        // "accidental markdown or ticks" from Foundation Models. Left in, it
+        // reaches the guard as an invented word and the whole repair is rejected,
+        // so it costs quality silently rather than showing up as visible junk.
+        let fence = "^\\s*```[a-zA-Z]*\\s*\\n?([\\s\\S]*?)\\n?\\s*```\\s*$"
+        if let r = text.range(of: fence, options: [.regularExpression]) {
+            let inner = text[r]
+            if let open = inner.range(of: "```[a-zA-Z]*\\s*\\n?", options: .regularExpression),
+               let close = inner.range(of: "\\n?\\s*```\\s*$", options: .regularExpression) {
+                text = String(inner[open.upperBound..<close.lowerBound])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
         }
         return text
     }

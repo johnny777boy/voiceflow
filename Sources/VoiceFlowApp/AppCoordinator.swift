@@ -4,6 +4,7 @@ import SwiftUI
 import AVFoundation
 import Speech
 import VoiceFlowCore
+import VoiceFlowWhisper
 
 /// Observable app state that bridges the SwiftUI UI with the `DictationController`
 /// actor and the global hotkey. Owns permission flow, settings persistence, and
@@ -37,6 +38,8 @@ final class AppCoordinator: ObservableObject {
     private let settingsStore: SettingsStore
     private let history: HistoryStoring
     private let secureStore: SecureStoring
+    /// The cleanup stage's account of the dictation in flight (see CleanupAuditLog).
+    private let cleanupAudit: CleanupAuditLog
     private let overlay = OverlayController()
     private let suggestionStore: SuggestedVocabularyStore
     private var corrections: CorrectionWatcher?
@@ -69,6 +72,13 @@ final class AppCoordinator: ObservableObject {
         self.hotkeys = GlobalHotkeyManager()
         self.suggestionStore = SuggestedVocabularyStore(url: AppPaths.suggestedVocabularyURL())
 
+
+        // One audit slot shared by the cleanup stage and the controller: the
+        // stage writes what it proposed and what the guard did with it, the
+        // controller copies that onto the history record (2026-08-19).
+        let cleanupAudit = CleanupAuditLog()
+        self.cleanupAudit = cleanupAudit
+
         // AI cleanup provider: prefer Apple's on-device model (free, private, no API
         // key) on macOS 26; otherwise the optional Anthropic provider (needs a key).
         let llmProvider: CleanupProviding
@@ -80,7 +90,7 @@ final class AppCoordinator: ObservableObject {
             // cleanup/punctuation off for a whole session. The provider re-checks
             // availability on EVERY call and falls back to rule-based only when it's
             // genuinely not ready — so cleanup turns on the moment the model is ready.
-            llmProvider = FoundationModelsCleanupProvider()
+            llmProvider = FoundationModelsCleanupProvider(audit: cleanupAudit)
             useLLM = true
             Log.cleanup.notice("cleanup: on-device Foundation Models (re-checked per call)")
         } else {
@@ -89,7 +99,7 @@ final class AppCoordinator: ObservableObject {
             useLLM = loaded.useLLMCleanup
             Log.cleanup.notice("cleanup: Anthropic (API key) / rule-based")
         }
-        let pipeline = CleanupPipeline(llmProvider: llmProvider, useLLM: useLLM)
+        let pipeline = CleanupPipeline(llmProvider: llmProvider, useLLM: useLLM, audit: cleanupAudit)
         // Pick the best engine: on macOS 26 use Apple's SpeechAnalyzer (records the
         // whole clip, then transcribes with full context — far more accurate).
         // Otherwise fall back to the legacy streaming engine.
@@ -114,6 +124,17 @@ final class AppCoordinator: ObservableObject {
         // covers every dictation before that, and any Whisper runtime failure).
         // No relaunch needed in either direction.
         let whisper = WhisperKitTranscriber()
+        // Benchmark mode: keep every capture so a normal day of dictation
+        // becomes a corpus that can be re-decoded offline under another model or
+        // with biasing on. Without it, a model A/B requires re-reading a script,
+        // and the reading varies more than the models do.
+        //   defaults write com.voiceflow.dictation benchmarkRetainCaptures -bool YES
+        if UserDefaults.standard.bool(forKey: "benchmarkRetainCaptures") {
+            let corpus = AppPaths.baseDirectory().appendingPathComponent("Benchmark", isDirectory: true)
+            whisper.retainCaptureFile = true
+            whisper.captureArchiveDirectory = corpus
+            Log.transcription.notice("BENCHMARK MODE: captures retained in \(corpus.path, privacy: .public)")
+        }
         // Second opinion for Whisper's silence-hallucinations: Apple's engine
         // emits nothing on silent clips, so it can veto phantom "Thank you."s.
         // ONLY the modern engine qualifies — the legacy streaming engine's
@@ -141,7 +162,8 @@ final class AppCoordinator: ObservableObject {
             activeApp: WorkspaceActiveAppProvider(),
             history: store,
             settings: loaded,
-            screenContext: AXScreenContextProvider()
+            screenContext: AXScreenContextProvider(),
+            cleanupAudit: cleanupAudit
         )
     }
 
@@ -462,6 +484,32 @@ final class AppCoordinator: ObservableObject {
     }
 
     // MARK: - Suggested vocabulary (Phase 4 — propose, never auto-apply)
+
+    /// Notice words that SOUND like the user's vocabulary but came out spelled
+    /// differently, and count them toward a suggestion.
+    ///
+    /// This replaces guesswork with the app's own observation. The old learning
+    /// path watched the text field for six seconds after insertion and needed an
+    /// Accessibility-readable field, the same app, and no send — measured
+    /// 2026-08-19, it had seen ZERO corrections across 40 dictations in Claude
+    /// (an Electron app) while catching 2 of 2 in Chrome. This signal needs none
+    /// of that: it reads the transcript we already have.
+    ///
+    /// It PROPOSES only. "codecs" and "codices" are real English words, so no
+    /// rule can tell "he said codecs" from "Codex was misheard" — substituting
+    /// would silently destroy a word he meant, which is precisely the failure
+    /// Wispr shipped. He approves an entry once; the deterministic replacer
+    /// handles it forever after.
+    private func noteMisheardVocabulary(in rawText: String) {
+        let detector = PhoneticVocabulary(entries: settings.vocabulary)
+        for miss in detector.nearMisses(in: rawText) {
+            if let ready = suggestionStore.record(
+                WordCorrection(heard: miss.heard, corrected: miss.written)) {
+                Log.cleanup.notice("Vocabulary suggestion ready: \(ready.corrected, privacy: .public)")
+                refreshSuggestions()
+            }
+        }
+    }
 
     func refreshSuggestions() {
         vocabularySuggestions = suggestionStore.readySuggestions()

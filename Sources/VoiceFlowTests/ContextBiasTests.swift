@@ -129,12 +129,40 @@ func runContextBiasTests(_ suite: TestSuite) {
 
     suite.test("context: prompt text stays under the cap and never truncates a term") { s in
         let distinct = (0..<20).map { "Nomenclature\($0)" }
-        let capped = TranscriptionContext(vocabularyTerms: distinct).promptText(maxCharacters: 60)
-        s.expect(capped.count <= 60, "prompt \(capped.count) chars exceeded the 60-char cap")
+        // The cap must cover the WHOLE prompt, framing included — only the last
+        // 224 tokens reach the decoder, so framing that escaped the budget would
+        // push the very terms it introduces out of the window.
+        let capped = TranscriptionContext(vocabularyTerms: distinct).promptText(maxCharacters: 140)
+        s.expect(capped.count <= 140, "prompt \(capped.count) chars exceeded the 140-char cap")
         s.expect(!capped.isEmpty, "cap swallowed every term")
-        for term in capped.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) }) {
+        // The prompt is a sentence now, so strip the framing before checking the
+        // terms themselves. The cap covers the WHOLE prompt including framing —
+        // counting only the terms would silently overrun the 224-token window.
+        let body = capped
+            .replacingOccurrences(of: TranscriptionContext.promptLeadIn, with: "")
+            .replacingOccurrences(of: TranscriptionContext.promptTrailer, with: "")
+            .trimmingCharacters(in: CharacterSet(charactersIn: ". "))
+        for term in body.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) }) {
             s.expect(distinct.contains(term), "prompt contained a truncated term: \(term)")
         }
+    }
+
+    suite.test("context: the prompt is a SENTENCE, not a word dump") { s in
+        // MEASURED 2026-08-19 with VoiceFlowBench once WhisperKit v1.1.0 revived
+        // biasing: a bare comma list of Capitalised Terms made Whisper copy the
+        // LIST'S STYLE into the transcript — "The Whisper Flow Parity Work Needs
+        // Aware Benchmark on My Voice". Whisper conditions on the prompt's form
+        // as well as its vocabulary, so the prompt has to look like ordinary
+        // prose or it corrupts the output it was meant to improve.
+        let prompt = TranscriptionContext(vocabularyTerms: ["Payload CMS", "Codex"]).promptText()
+        s.expect(prompt.hasSuffix("."), "prompt must end like a sentence, got: \(prompt)")
+        s.expect(prompt.contains(" "), "prompt must read as prose")
+        s.expect(prompt.contains("Payload CMS") && prompt.contains("Codex"),
+                 "every term must survive, got: \(prompt)")
+        // Rare words carry more weight the later they appear, so the terms must
+        // sit at the END of the sentence, not the start.
+        let head = prompt.prefix(while: { $0 != ":" && $0 != "," })
+        s.expectFalse(head.hasPrefix("Payload"), "terms must not lead the prompt: \(prompt)")
     }
 
     suite.test("context: empty context yields an empty prompt") { s in

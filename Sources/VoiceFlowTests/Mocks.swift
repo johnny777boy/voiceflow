@@ -50,11 +50,16 @@ final class MockTranscriber: Transcribing, @unchecked Sendable {
     func transcribe(_ audio: AudioCapture, languageCode: String) async throws -> TranscriptionResult {
         try await transcribe(audio, languageCode: languageCode, context: .empty)
     }
+    /// Runs inside the transcribe call — lets a test advance an injected clock so
+    /// stage timing is observable without real sleeps.
+    var onTranscribe: (@Sendable () -> Void)?
+
     func transcribe(
         _ audio: AudioCapture, languageCode: String, context: TranscriptionContext
     ) async throws -> TranscriptionResult {
         lastLanguage = languageCode
         lastContext = context
+        onTranscribe?()
         if delay > 0 { try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
         if let error { throw error }
         return resultToReturn

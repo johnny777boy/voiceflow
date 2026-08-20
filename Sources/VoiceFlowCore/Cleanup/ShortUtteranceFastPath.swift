@@ -3,12 +3,19 @@ import Foundation
 /// Decides when the LLM cleanup pass can be skipped without changing the text
 /// it would have produced.
 ///
-/// Why this is safe: with the strict bidirectional `CleanupGuard`, the on-device
-/// model is effectively a punctuation-and-capitalization pass — it may not add,
-/// drop or swap a word. For a short casual utterance the deterministic rules
-/// already produce exactly that result, and skipping the model removes ~0.5–1s
-/// from the felt latency of the replies people send most often ("yes", "on my
-/// way", "sounds good").
+/// ⚠️ ITS ORIGINAL SAFETY ARGUMENT WAS WRONG, and it now ships OFF by default.
+/// The claim was: the strict `CleanupGuard` reduces the model to a
+/// punctuation-and-capitalization pass, so skipping it changes nothing. But the
+/// guard permits morphological grammar repair — "You'll finish everything." →
+/// "You finished everything." passes it (pinned by test). So the skip was
+/// silently discarding genuine corrections, and doing so precisely on the short
+/// bursts that are HARDEST for the recognizer: least context, most errors, and
+/// then excluded from the one stage that could have fixed them. That combination
+/// produced the 2026-08-18 accuracy complaint.
+///
+/// It remains available for users who want the ~0.5–1s back on casual replies,
+/// but the honest way to buy that latency is two-phase delivery, which keeps the
+/// repair instead of discarding it.
 ///
 /// The one thing the rules genuinely cannot do is choose `?` over `.`, so any
 /// utterance that opens like a question keeps its LLM pass. Email keeps its pass

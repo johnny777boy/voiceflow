@@ -1,5 +1,6 @@
 import SwiftUI
 import VoiceFlowCore
+import VoiceFlowWhisper
 
 /// Preferences window. Edits a local draft of `AppSettings` and applies changes
 /// back to the coordinator (which persists them and reconfigures the controller).
@@ -36,8 +37,11 @@ struct SettingsView: View {
             Picker("Cleanup strength", selection: $draft.cleanupStrength) {
                 ForEach(CleanupStrength.allCases, id: \.self) { Text($0.displayName).tag($0) }
             }
+            Toggle("Correct my grammar, not just punctuation", isOn: $draft.grammarRepairEnabled)
+            Text("Lets the on-device AI fix grammar — verb tenses, missing words like \"the\" and \"to\", subject–verb agreement — instead of only adding punctuation. It can never change your meaning: your own words, names, numbers and any \"not\" are locked, and it cannot swap words that carry meaning (\"to\"→\"from\", \"before\"→\"after\", \"I\"→\"you\"). Turn this off for strictly verbatim transcription.")
+                .font(.caption).foregroundStyle(.secondary)
             Toggle("Fast path for short phrases", isOn: $draft.fastShortUtterances)
-            Text("Skips the AI polish for casual replies of eight words or fewer (\"on my way\"), where the offline rules already produce the same text about a second sooner. Questions and email always keep the AI pass.")
+            Text("Skips the AI polish for casual replies of eight words or fewer, saving about a second — but the AI pass also repairs grammar and misheard words, so skipping it can leave errors in short dictations. Off by default: accuracy first. Questions and email always keep the pass.")
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("Insert instantly, polish in place (experimental)", isOn: $draft.twoPhaseDeliveryEnabled)
             Text("Puts the offline result in the field the moment it's ready, then upgrades it in place when the AI pass finishes. Off by default — the in-place edit is abandoned if you've started typing, but it hasn't been lived on yet.")

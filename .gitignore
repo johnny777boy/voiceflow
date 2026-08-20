@@ -23,3 +23,7 @@ secrets/
 
 # Machine-local Claude session state
 .claude/
+
+# Verbatim dictation text — never leaves the Mac.
+docs/bad-dictations.jsonl
+bad-dictations.jsonl

@@ -180,7 +180,7 @@ func runCleanupTests(_ s: TestSuite) {
         // is indistinguishable from a homophone error ("pill" → "peel").
         s.expect(CleanupGuard.preservesMeaning(
             original: "I am interesting for discuss this problematic with your recommend tomorrow",
-            cleaned: "I am interested in discussing this problematic with your recommendation tomorrow."),
+            cleaned: "I am interested for discussing this problematic with your recommendation tomorrow."),
                  "stem-preserving rewrite accepted")
         s.expect(!CleanupGuard.preservesMeaning(
             original: "I am interesting for discuss this problematic with your recommend tomorrow",
@@ -216,6 +216,115 @@ func runCleanupTests(_ s: TestSuite) {
         s.expectEqual(AppSettings.autoMode(forBundleIdentifier: "com.example.mailroomInventory"), .cleanWriting)
         s.expectEqual(AppSettings.autoMode(forBundleIdentifier: "com.example.terminalVelocity"), .cleanWriting)
     }
+
+    // MARK: - The 2026-08-18 live defect: what actually blocked the repair
+
+    s.test("guard: the real-world grammar repairs are ALLOWED, not blocked") { s in
+        // Live example: he said "you finished everything?", the recognizer wrote
+        // "You'll finish everything." The guard was blamed for leaving it — wrongly.
+        // It PERMITS this repair ("finished" shares a stem with "finish"; the
+        // contraction shard "ll" is not a content word). Pinned so the guard is
+        // never again accused of a failure that belongs elsewhere.
+        s.expect(CleanupGuard.preservesMeaning(
+            original: "You'll finish everything.", cleaned: "You finished everything."))
+        s.expect(CleanupGuard.preservesMeaning(
+            original: "I am interesting for discuss this", cleaned: "I am interested for discussing this"))
+    }
+
+    s.test("cleanup audit: every path says what it did, including the silent ones") { s in
+        // The silent paths are the ones that made the complaint unanswerable:
+        // a fast-path skip and a rejected polish both deliver the rule result.
+        let skipped = CleanupAuditLog()
+        _ = blockingAwait { try? await CleanupPipeline(
+            llmProvider: FixedLLM(output: "REFINED"), useLLM: true, audit: skipped)
+            .clean("we finished the deck today",
+                   context: CleanupContext(mode: .cleanWriting, strength: .standard,
+                                           vocabulary: VocabularyEntry.defaults,
+                                           languageCode: "en-US", fastPathEnabled: true)) }
+        s.expectEqual(skipped.take()?.decision, "fast-path")
+
+        let rulesOnly = CleanupAuditLog()
+        _ = blockingAwait { try? await CleanupPipeline(useLLM: false, audit: rulesOnly)
+            .clean("this is a longer sentence that the rules alone will handle",
+                   context: ctx(.cleanWriting)) }
+        s.expectEqual(rulesOnly.take()?.decision, "rules-only")
+
+        let broken = CleanupAuditLog()
+        _ = blockingAwait { try? await CleanupPipeline(
+            llmProvider: FailingLLM(), useLLM: true, audit: broken)
+            .clean("this is a longer sentence that the model will fail on",
+                   context: ctx(.cleanWriting)) }
+        s.expectEqual(broken.take()?.decision, "unavailable")
+
+        // Each dictation's account is taken exactly once — never inherited.
+        let once = CleanupAuditLog()
+        once.record(.init(decision: "accepted"))
+        s.expectEqual(once.take()?.decision, "accepted")
+        s.expectNil(once.take())
+        // An entry stamped for a DIFFERENT dictation is discarded, not returned:
+        // an abandoned timeout task from dictation N keeps running and can drop
+        // its entry into the slot while N+1 is in flight, which would file N's
+        // proposed text against N+1's history row.
+        let a = UUID(), b = UUID()
+        let stamped = CleanupAuditLog()
+        stamped.record(.init(dictationID: a, proposed: "from the previous one", decision: "rejected"))
+        s.expectNil(stamped.take(expecting: b), "a late entry from another dictation must not be adopted")
+        stamped.record(.init(dictationID: b, proposed: "mine", decision: "accepted"))
+        s.expectEqual(stamped.take(expecting: b)?.proposed, "mine")
+
+        // And the precise inner verdict outranks the coarse outer one.
+        once.record(.init(proposed: "x", decision: "rejected", reason: "dropped the word \"well\""))
+        once.recordIfAbsent(.init(decision: "unavailable"))
+        s.expectEqual(once.take()?.decision, "rejected")
+    }
+
+    s.test("fast path: THIS is what skipped the repair on short dictations") { s in
+        // 6 words, statement, cleanWriting ⇒ the LLM pass is skipped entirely, so
+        // no grammar repair is ever attempted. He dictates in short bursts, so the
+        // clips that are HARDEST for the recognizer were also the ones denied the
+        // repair pass — the accuracy complaint of 2026-08-18.
+        s.expect(ShortUtteranceFastPath.canSkipLLM(
+            "It's all done. You'll finish everything.", mode: .cleanWriting),
+            "the live example must be recognised as a fast-path skip")
+    }
+
+
+    // MARK: - The dictation must always arrive (2026-08-18 hang)
+
+    s.test("cleanup: a hung model cannot stall the dictation forever") { s in
+        // Live defect: the on-device model hung, nothing bounded it, and the
+        // dictation never completed — the overlay sat on "Transcribing…" and the
+        // user's words were lost. Polish is optional; delivery is not.
+        let pipeline = CleanupPipeline(llmProvider: HangingLLM(), useLLM: true)
+        let context = CleanupContext(
+            mode: .cleanWriting, strength: .standard, vocabulary: [],
+            languageCode: "en-US", fastPathEnabled: false, cleanupTimeout: 0.3)
+        let started = Date()
+        let result = blockingAwait { try? await pipeline.clean("hello there friend", context: context) }
+        let elapsed = Date().timeIntervalSince(started)
+        s.expectNotNil(result ?? nil, "the dictation was swallowed by the hung model")
+        s.expect(elapsed < 3, "clean() waited \(elapsed)s on a hung model instead of giving up")
+    }
+
+    s.test("cleanup: a model that answers within the deadline is still used") { s in
+        let pipeline = CleanupPipeline(llmProvider: FixedLLM(output: "Hello there, friend."), useLLM: true)
+        let context = CleanupContext(
+            mode: .cleanWriting, strength: .standard, vocabulary: [],
+            languageCode: "en-US", fastPathEnabled: false, cleanupTimeout: 5)
+        let result = blockingAwait { try? await pipeline.clean("hello there friend", context: context) }
+        s.expectEqual(result ?? nil, "Hello there, friend.")
+    }
+
+
+    s.test("cleanup: Apple's model leaking markdown must not reach the field") { s in
+        // MacWhisper shipped a release specifically for Apple Foundation Models
+        // emitting "accidental markdown or ticks" and ">" prefixes. Ours would
+        // surface as guard rejections — silent quality loss — rather than visible
+        // corruption, so the stripper has to handle them.
+        s.expectEqual(TextNormalizer.stripLLMPreamble("Here is the cleaned text:\nHello there."), "Hello there.")
+        s.expectEqual(TextNormalizer.stripLLMPreamble("```\nHello there.\n```"), "Hello there.")
+    }
+
 }
 
 private struct FailingLLM: CleanupProviding {
@@ -229,3 +338,17 @@ private struct FixedLLM: CleanupProviding {
     func clean(_ rawText: String, context: CleanupContext) async throws -> String { output }
 }
 
+
+/// Hangs UNCOOPERATIVELY — ignores cancellation, like a wedged XPC/ANE call.
+///
+/// Deliberately not `Task.sleep`: sleep is cancellation-responsive, so a sleeping
+/// stand-in passes even against a deadline that cannot actually abandon a hang.
+/// The first version of `withDeadline` did exactly that and shipped a Critical.
+private struct HangingLLM: CleanupProviding {
+    func clean(_ rawText: String, context: CleanupContext) async throws -> String {
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global().asyncAfter(deadline: .now() + 30) { c.resume() }
+        }
+        return rawText
+    }
+}

@@ -16,11 +16,15 @@ let package = Package(
     products: [
         .library(name: "VoiceFlowCore", targets: ["VoiceFlowCore"]),
         .executable(name: "VoiceFlow", targets: ["VoiceFlowApp"]),
-        .executable(name: "VoiceFlowTests", targets: ["VoiceFlowTests"])
+        .executable(name: "VoiceFlowTests", targets: ["VoiceFlowTests"]),
+        .executable(name: "VoiceFlowBench", targets: ["VoiceFlowBench"]),
+        // Replays real dictations through the production cleanup path — the
+        // answer to "how do we know it is actually working?".
+        .executable(name: "VoiceFlowReplay", targets: ["VoiceFlowReplay"])
     ],
     dependencies: [
         // On-device Whisper (Core ML / Neural Engine) for the optional High-Accuracy mode.
-        .package(url: "https://github.com/argmaxinc/WhisperKit", from: "0.9.0")
+        .package(url: "https://github.com/argmaxinc/WhisperKit", from: "1.1.0")
     ],
     targets: [
         .target(
@@ -34,12 +38,33 @@ let package = Package(
             name: "VoiceFlowTestKit",
             dependencies: []
         ),
-        .executableTarget(
-            name: "VoiceFlowApp",
+        // The Whisper engine lives in a LIBRARY, not the app executable, so the
+        // offline benchmark can drive the EXACT production decode path. A
+        // harness that reimplements the thing it measures proves nothing — and
+        // measuring the real path is the whole point of the accuracy work.
+        // Kept out of VoiceFlowCore so the test target never links WhisperKit.
+        .target(
+            name: "VoiceFlowWhisper",
             dependencies: [
                 "VoiceFlowCore",
                 .product(name: "WhisperKit", package: "WhisperKit")
             ]
+        ),
+        .executableTarget(
+            name: "VoiceFlowApp",
+            dependencies: [
+                "VoiceFlowCore",
+                "VoiceFlowWhisper",
+                .product(name: "WhisperKit", package: "WhisperKit")
+            ]
+        ),
+        .executableTarget(
+            name: "VoiceFlowBench",
+            dependencies: ["VoiceFlowCore", "VoiceFlowWhisper"]
+        ),
+        .executableTarget(
+            name: "VoiceFlowReplay",
+            dependencies: ["VoiceFlowCore"]
         ),
         .executableTarget(
             name: "VoiceFlowTests",

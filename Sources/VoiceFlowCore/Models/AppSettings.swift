@@ -36,9 +36,21 @@ public struct AppSettings: Codable, Sendable, Equatable {
     /// Accessibility (never screenshots, never uploaded). On by default: it is
     /// the accuracy lever that makes names/jargon transcribe correctly.
     public var screenContextEnabled: Bool
-    /// Let short casual utterances skip the LLM cleanup pass (saves ~1s on the
-    /// replies people send most often; questions and email always keep it).
+    /// Let short casual utterances skip the LLM cleanup pass. OFF by default
+    /// since 2026-08-18: it was built believing the guard reduced the model to a
+    /// punctuation pass, so skipping it cost nothing. That premise was FALSE —
+    /// the guard permits grammar repair — so the skip was silently discarding
+    /// real fixes on exactly the short bursts the recognizer struggles with most.
+    /// Speed may never cost accuracy (standing rule); use two-phase delivery to
+    /// recover the felt latency instead.
     public var fastShortUtterances: Bool
+    /// Let the on-device model correct GRAMMAR — irregular verbs, missing
+    /// articles and prepositions, subject–verb agreement — instead of only
+    /// punctuation. On by default (Yoni, 2026-08-18): as a non-native speaker he
+    /// wants correct English out, and the verbatim-only rule was blocking exactly
+    /// the repairs he needs. Content words, names, numbers and negation stay
+    /// locked either way — it fixes HOW he said it, never WHAT he said.
+    public var grammarRepairEnabled: Bool
     /// EXPERIMENTAL, off by default: insert the deterministic text instantly and
     /// upgrade it in place when the LLM polish lands. Needs live testing before
     /// it can be recommended — an in-place edit races the user's own typing.
@@ -66,7 +78,8 @@ public struct AppSettings: Codable, Sendable, Equatable {
         privacyRedactionEnabled: Bool = false,
         spokenPunctuationEnabled: Bool = false,
         screenContextEnabled: Bool = true,
-        fastShortUtterances: Bool = true,
+        fastShortUtterances: Bool = false,
+        grammarRepairEnabled: Bool = true,
         twoPhaseDeliveryEnabled: Bool = false,
         micIdleReleaseEnabled: Bool = true
     ) {
@@ -86,6 +99,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
         self.spokenPunctuationEnabled = spokenPunctuationEnabled
         self.screenContextEnabled = screenContextEnabled
         self.fastShortUtterances = fastShortUtterances
+        self.grammarRepairEnabled = grammarRepairEnabled
         self.twoPhaseDeliveryEnabled = twoPhaseDeliveryEnabled
         self.micIdleReleaseEnabled = micIdleReleaseEnabled
     }
@@ -112,6 +126,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
         spokenPunctuationEnabled = try c.decodeIfPresent(Bool.self, forKey: .spokenPunctuationEnabled) ?? d.spokenPunctuationEnabled
         screenContextEnabled = try c.decodeIfPresent(Bool.self, forKey: .screenContextEnabled) ?? d.screenContextEnabled
         fastShortUtterances = try c.decodeIfPresent(Bool.self, forKey: .fastShortUtterances) ?? d.fastShortUtterances
+        grammarRepairEnabled = try c.decodeIfPresent(Bool.self, forKey: .grammarRepairEnabled) ?? d.grammarRepairEnabled
         twoPhaseDeliveryEnabled = try c.decodeIfPresent(Bool.self, forKey: .twoPhaseDeliveryEnabled) ?? d.twoPhaseDeliveryEnabled
         micIdleReleaseEnabled = try c.decodeIfPresent(Bool.self, forKey: .micIdleReleaseEnabled) ?? d.micIdleReleaseEnabled
     }

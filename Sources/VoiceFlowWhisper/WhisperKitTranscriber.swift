@@ -16,9 +16,27 @@ import VoiceFlowCore
 /// Until then `isReady` is false and the `FallbackTranscriber` routes dictations
 /// to the Apple engine, so nothing ever fails or blocks on the ~1 GB download.
 @available(macOS 14.0, *)
-final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
+public final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
     private let lock = NSLock()
     private var pipeline: WhisperKit?
+    /// When true the capture file is NEVER deleted after a successful decode.
+    /// A paired model A/B decodes the same audio under both models, so the
+    /// production "delete on success" behaviour would destroy the experiment
+    /// after the first run. Off in the app; set only by the benchmark.
+    public var retainCaptureFile = false
+
+    /// When set, every capture is copied here before decoding, and the capture
+    /// file is retained. This is how a real dictation session becomes a
+    /// benchmark corpus: the same audio can then be decoded again offline under
+    /// a different model or with biasing on, which is the only way to compare
+    /// them without the owner re-reading a script (and re-reading is itself a
+    /// large source of variance — larger than the effect being measured).
+    ///
+    /// OFF unless `benchmarkRetainCaptures` is set. Audio never leaves the Mac
+    /// either way; this only decides whether it survives past the dictation.
+    public var captureArchiveDirectory: URL?
+
+    public init() {}
     private var suppressTokens: [Int] = []
 
     /// Second-opinion engine for phantom suppression (the Apple engine). Whisper
@@ -27,16 +45,16 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
     /// whole output is a known phantom phrase, the same recording is re-checked
     /// here: arbiter hears words ⇒ genuine speech, deliver; arbiter hears
     /// nothing ⇒ silence, discard. Real speech can never be eaten by this veto.
-    var silenceArbiter: Transcribing?
+    public var silenceArbiter: Transcribing?
 
     /// Thread-safe readiness check for the per-dictation route.
-    var isReady: Bool {
+    public var isReady: Bool {
         lock.lock(); defer { lock.unlock() }
         return pipeline != nil
     }
 
     /// Called by `WhisperModelManager` once the model is downloaded and loaded.
-    func adopt(_ loaded: WhisperKit) {
+    public func adopt(_ loaded: WhisperKit) {
         // Resolve the non-speech suppression token set once per loaded model
         // (token ids differ across vocab versions, so never hardcode them).
         let tokens = loaded.tokenizer.map(Self.nonSpeechTokens) ?? []
@@ -110,19 +128,32 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         return Array(tokens.prefix(maxTokens))
     }
 
-    func requestPermission() async -> Bool { true }   // mic handled by the recorder
+    /// Copy the capture into the benchmark corpus, named so filename order is
+    /// chronological order — the bench pairs hypothesis line N with reference
+    /// line N, so a stable order is not cosmetic.
+    private func archiveCaptureIfNeeded(_ url: URL) {
+        guard let directory = captureArchiveDirectory else { return }
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let stamp = String(format: "%015.0f", Date().timeIntervalSince1970 * 1000)
+        let destination = directory
+            .appendingPathComponent("capture-\(stamp).\(url.pathExtension.isEmpty ? "wav" : url.pathExtension)")
+        try? FileManager.default.copyItem(at: url, to: destination)
+    }
 
-    func transcribe(_ audio: AudioCapture, languageCode: String) async throws -> VoiceFlowCore.TranscriptionResult {
+    public func requestPermission() async -> Bool { true }   // mic handled by the recorder
+
+    public func transcribe(_ audio: AudioCapture, languageCode: String) async throws -> VoiceFlowCore.TranscriptionResult {
         try await transcribe(audio, languageCode: languageCode, context: .empty)
     }
 
-    func transcribe(
+    public func transcribe(
         _ audio: AudioCapture, languageCode: String, context: VoiceFlowCore.TranscriptionContext
     ) async throws -> VoiceFlowCore.TranscriptionResult {
         guard let (wk, suppress) = currentPipeline() else {
             throw VoiceFlowError.audioEngineFailure("Whisper model not ready.")
         }
         guard let url = audio.fileURL else { throw VoiceFlowError.emptyTranscript }
+        archiveCaptureIfNeeded(url)
 
         // Load once (resampled to 16kHz mono by WhisperKit) and measure energy in
         // 100ms chunks. Whisper hallucinates full sentences on silence, so a
@@ -131,7 +162,27 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         // (0.02 RMS): a quiet accented speaker must never be gated. Both RMS and
         // peak must agree before we discard. Energies are logged on every clip so
         // the thresholds can be tuned from real data.
-        let samples = try AudioProcessor.loadAudioAsFloatArray(fromPath: url.path)
+        let loaded = try AudioProcessor.loadAudioAsFloatArray(fromPath: url.path)
+        // Cut the dead air before he starts speaking. MEASURED on his own
+        // recordings 2026-08-19: every clip carried 1.6-2.7s of it, and on the
+        // first A/B sentence that gap cost five words AND invented a "Thank you"
+        // he never said — "Codex, verify branch before merging to domain. Thank
+        // you." became "Ask Codex to verify the branch before we merge it to
+        // domain." Eight errors to one.
+        //
+        // This only ever removes audio from the FRONT and always keeps a lead-in,
+        // so no spoken sound can be lost; the energy gate below still sees the
+        // whole clip's loudest moment either way. Kill switch, because this is
+        // the audio path:
+        //   defaults write com.voiceflow.dictation trimLeadingSilence -bool NO
+        let trimLeading = UserDefaults.standard.object(forKey: "trimLeadingSilence") as? Bool ?? true
+        let samples = trimLeading
+            ? LeadingSilence.trimmed(loaded, sampleRate: 16_000)
+            : loaded
+        if samples.count != loaded.count {
+            let removed = Double(loaded.count - samples.count) / 16_000
+            Log.transcription.notice("Trimmed \(removed, privacy: .public)s of leading silence")
+        }
         let chunkSize = 1600   // 100ms @ 16kHz
         var maxChunkRMS: Float = 0
         var index = 0
@@ -172,7 +223,7 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         // silence defense lives in the energy gate above + post-filter below.
         // Re-audit this (and prefill interaction, WhisperKit issue #27) on any
         // WhisperKit version bump.
-        options.supressTokens = suppress   // (sic — WhisperKit API spelling)
+        options.suppressTokens = suppress   // typo `supressTokens` was fixed upstream in v1.0.0
         options.withoutTimestamps = true
         options.wordTimestamps = false
         options.chunkingStrategy = ChunkingStrategy.none
@@ -183,15 +234,30 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         // startOfPreviousToken, filtered below specialTokenBegin, and the prefill
         // KV-cache is bypassed whenever promptTokens is set — the PR #514
         // behavior this feature depends on.
-        if let tokenizer = wk.tokenizer,
+        // DISABLED (2026-08-18, lived defect): feeding promptTokens silenced the
+        // decoder COMPLETELY — every dictation decoded to zero characters and
+        // fell back to the Apple engine, for over a week, with no visible error.
+        // Proven live by A/B: prompt off ⇒ Whisper transcribes normally; prompt
+        // on ⇒ 0 chars, every time. Root cause in WhisperKit 0.18's prompt
+        // handling is still to be isolated (see BACKLOG); until it is fixed and
+        // WER-verified, no prompt is fed. Whisper without biasing beats Apple
+        // with it — the accuracy floor comes first.
+        // Dev switch (`defaults write com.voiceflow.dictation whisperPromptBiasingEnabled -bool YES`)
+        // so the eventual fix can be A/B-tested live without a rebuild. Ships false.
+        var promptWasFed = false
+        if UserDefaults.standard.bool(forKey: "whisperPromptBiasingEnabled"),
+           let tokenizer = wk.tokenizer,
            let prompt = Self.promptTokens(for: context, tokenizer: tokenizer) {
             options.promptTokens = prompt
             options.usePrefillPrompt = true
+            promptWasFed = true
             // Terms come from the user's screen: count in the clear, contents private.
             Log.transcription.notice("Whisper context bias: \(context.orderedTerms.count, privacy: .public) terms, \(prompt.count, privacy: .public) tokens — \(context.promptText(), privacy: .private)")
         }
 
+        let decodeStarted = Date()
         let results = try await wk.transcribe(audioArray: samples, decodeOptions: options)
+        let decodeSeconds = max(0, Date().timeIntervalSince(decodeStarted))
         let text = results.map { $0.text }.joined(separator: " ")
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -226,11 +292,17 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         // "short clip, few words" test below would never catch it. Delivering it
         // would both insert words the user never said and paste what was on their
         // screen into whatever they're typing.
-        if TranscriptSanity.looksLikePromptEcho(text: text, promptTerms: context.orderedTerms) {
+        // The echo defense guards against the decoder reading the PROMPT back;
+        // with no prompt fed there is nothing to echo, and running the check
+        // anyway would spend an arbiter run on every vocabulary-dense sentence
+        // for no protection. Re-enable together with the prompt.
+        if promptWasFed, TranscriptSanity.looksLikePromptEcho(text: text, promptTerms: context.orderedTerms) {
             Log.transcription.error("Whisper echoed the context prompt — discarding the decode")
-            switch try await consultArbiter(audio, languageCode: languageCode, context: context) {
+            let (echoVerdict, echoArbiterSeconds) = try await consultArbiterTimed(
+                audio, languageCode: languageCode, context: context)
+            switch echoVerdict {
             case .heard(let second):
-                try? FileManager.default.removeItem(at: url)
+                if !retainCaptureFile { try? FileManager.default.removeItem(at: url) }
                 // The other engine had no prompt to echo, so it is the tiebreak.
                 // Whisper's text stands ONLY if every word in it was independently
                 // produced by that engine too — then nothing came from the
@@ -241,10 +313,14 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
                 // that never contained it.
                 if TranscriptSanity.isFullyCorroborated(text, by: second) {
                     Log.transcription.notice("Echo suspicion cleared — every word was corroborated by the second engine")
-                    return VoiceFlowCore.TranscriptionResult(text: text)
+                    return VoiceFlowCore.TranscriptionResult(
+                        text: text, engineName: "whisper",
+                        decodeSeconds: decodeSeconds, arbiterSeconds: echoArbiterSeconds)
                 }
                 Log.transcription.notice("Arbiter transcript used in place of the echoed decode")
-                return VoiceFlowCore.TranscriptionResult(text: second)
+                return VoiceFlowCore.TranscriptionResult(
+                    text: second, engineName: "apple",
+                    decodeSeconds: decodeSeconds, arbiterSeconds: echoArbiterSeconds)
             case .silence, .unavailable:
                 // Silence ⇒ there was nothing to hear anyway. Unavailable ⇒ we
                 // cannot verify, and a contaminated transcript must not be
@@ -260,15 +336,19 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
             Log.transcription.notice("Whisper phantom candidate \"\(text, privacy: .public)\" (dur=\(clipSeconds, privacy: .public)s logProb=\(minLogProb ?? 0, privacy: .public) maxRMS=\(maxChunkRMS, privacy: .public)) — asking arbiter")
             var arbiterUnavailable = silenceArbiter == nil
             if silenceArbiter != nil {
-                switch try await consultArbiter(audio, languageCode: languageCode, context: context) {
+                let (phantomVerdict, phantomArbiterSeconds) = try await consultArbiterTimed(
+                    audio, languageCode: languageCode, context: context)
+                switch phantomVerdict {
                 case .heard(let second):
                     Log.transcription.notice("Arbiter heard speech — delivering Whisper text")
                     // The second opinion is already paid for; let it fix a name.
                     let merged = vote(primary: text, secondary: second, context: context)
                     // We still own the original capture (the arbiter only ever saw
                     // a copy), and this is the success path, so consume it here.
-                    try? FileManager.default.removeItem(at: url)
-                    return VoiceFlowCore.TranscriptionResult(text: merged)
+                    if !retainCaptureFile { try? FileManager.default.removeItem(at: url) }
+                    return VoiceFlowCore.TranscriptionResult(
+                        text: merged, engineName: "whisper",
+                        decodeSeconds: decodeSeconds, arbiterSeconds: phantomArbiterSeconds)
                 case .silence:
                     // The one verdict that means "silence": discard the phantom.
                     Log.transcription.notice("Arbiter heard nothing — phantom discarded")
@@ -309,10 +389,14 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
             // Whisper's doesn't. Bounded on purpose: no near-miss, no second run,
             // so the ordinary dictation pays nothing.
             Log.transcription.notice("Vocabulary near-miss in Whisper output — asking the second engine")
-            if case .heard(let second) = try await consultArbiter(audio, languageCode: languageCode, context: context) {
+            let (voteVerdict, voteArbiterSeconds) = try await consultArbiterTimed(
+                audio, languageCode: languageCode, context: context)
+            if case .heard(let second) = voteVerdict {
                 let merged = vote(primary: text, secondary: second, context: context)
-                try? FileManager.default.removeItem(at: url)
-                return VoiceFlowCore.TranscriptionResult(text: merged)
+                if !retainCaptureFile { try? FileManager.default.removeItem(at: url) }
+                return VoiceFlowCore.TranscriptionResult(
+                    text: merged, engineName: "whisper",
+                    decodeSeconds: decodeSeconds, arbiterSeconds: voteArbiterSeconds)
             }
             // Silence or unavailable: a near-miss is not a phantom signal, so the
             // Whisper text stands exactly as decoded.
@@ -320,8 +404,29 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         // Success: the capture file is consumed here. On ANY failure above we leave
         // the file alone — the FallbackTranscriber re-runs the Apple engine, which
         // reads the same file via its internal URL.
-        try? FileManager.default.removeItem(at: url)
-        return VoiceFlowCore.TranscriptionResult(text: text)
+        if !retainCaptureFile { try? FileManager.default.removeItem(at: url) }
+        // Whisper's own uncertainty, kept instead of discarded. `avgLogprob` is
+        // roughly -0.1 when the model is sure and below -0.8 when it is
+        // guessing, and guessing is exactly where "wrench" appears instead of
+        // "rent". Nothing branches on it — it is how history can later point at
+        // the dictations most likely to contain an error, which is otherwise
+        // unknowable without re-reading everything.
+        let confidence = minLogProb.map { Float(max(0, min(1, 1 + $0))) } ?? 1
+        return VoiceFlowCore.TranscriptionResult(
+            text: text, confidence: confidence,
+            engineName: "whisper", decodeSeconds: decodeSeconds)
+    }
+
+    /// `consultArbiter` plus a stopwatch, so every call site reports how much the
+    /// second opinion actually cost — the variable expense the latency data needs.
+    private func consultArbiterTimed(
+        _ audio: AudioCapture, languageCode: String, context: VoiceFlowCore.TranscriptionContext
+    ) async throws -> (ArbiterVerdict, Double) {
+        let started = Date()
+        let verdict = try await consultArbiter(audio, languageCode: languageCode, context: context)
+        // Clamped: a backward wall-clock step (NTP) must never persist a
+        // negative duration into history.
+        return (verdict, max(0, Date().timeIntervalSince(started)))
     }
 
     /// What the second engine made of the same recording.

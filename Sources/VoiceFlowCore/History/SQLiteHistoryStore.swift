@@ -32,7 +32,15 @@ public final class SQLiteHistoryStore: HistoryStoring, @unchecked Sendable {
             errorMessage TEXT,
             createdAt REAL NOT NULL,
             insertLatencySeconds REAL NOT NULL DEFAULT 0,
-            editedAfterInsert INTEGER NOT NULL DEFAULT 0
+            editedAfterInsert INTEGER NOT NULL DEFAULT 0,
+            transcribeSeconds REAL NOT NULL DEFAULT 0,
+            arbiterSeconds REAL NOT NULL DEFAULT 0,
+            cleanupSeconds REAL NOT NULL DEFAULT 0,
+            engineUsed TEXT,
+            cleanupProposed TEXT,
+            cleanupDecision TEXT,
+            cleanupRejectReason TEXT,
+            recognizerConfidence REAL
         );
         """)
         try execute("CREATE INDEX IF NOT EXISTS idx_transcripts_createdAt ON transcripts(createdAt DESC);")
@@ -48,6 +56,14 @@ public final class SQLiteHistoryStore: HistoryStoring, @unchecked Sendable {
         for column in [
             "insertLatencySeconds REAL NOT NULL DEFAULT 0",
             "editedAfterInsert INTEGER NOT NULL DEFAULT 0",
+            "transcribeSeconds REAL NOT NULL DEFAULT 0",
+            "arbiterSeconds REAL NOT NULL DEFAULT 0",
+            "cleanupSeconds REAL NOT NULL DEFAULT 0",
+            "engineUsed TEXT",
+            "cleanupProposed TEXT",
+            "cleanupDecision TEXT",
+            "cleanupRejectReason TEXT",
+            "recognizerConfidence REAL",
         ] {
             try? execute("ALTER TABLE transcripts ADD COLUMN \(column);")
         }
@@ -62,8 +78,10 @@ public final class SQLiteHistoryStore: HistoryStoring, @unchecked Sendable {
         let sql = """
         INSERT OR REPLACE INTO transcripts
         (id, rawText, cleanText, appBundleIdentifier, appName, mode, insertionStrategy, latencySeconds,
-         errorMessage, createdAt, insertLatencySeconds, editedAfterInsert)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?);
+         errorMessage, createdAt, insertLatencySeconds, editedAfterInsert,
+         transcribeSeconds, arbiterSeconds, cleanupSeconds, engineUsed,
+         cleanupProposed, cleanupDecision, cleanupRejectReason, recognizerConfidence)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);
         """
         let stmt = try prepare(sql)
         defer { sqlite3_finalize(stmt) }
@@ -79,6 +97,15 @@ public final class SQLiteHistoryStore: HistoryStoring, @unchecked Sendable {
         sqlite3_bind_double(stmt, 10, record.createdAt.timeIntervalSince1970)
         sqlite3_bind_double(stmt, 11, record.insertLatencySeconds)
         sqlite3_bind_int(stmt, 12, record.editedAfterInsert ? 1 : 0)
+        sqlite3_bind_double(stmt, 13, record.transcribeSeconds)
+        sqlite3_bind_double(stmt, 14, record.arbiterSeconds)
+        sqlite3_bind_double(stmt, 15, record.cleanupSeconds)
+        bindText(stmt, 16, record.engineUsed)
+        bindText(stmt, 17, record.cleanupProposed)
+        bindText(stmt, 18, record.cleanupDecision)
+        bindText(stmt, 19, record.cleanupRejectReason)
+        if let c = record.recognizerConfidence { sqlite3_bind_double(stmt, 20, c) }
+        else { sqlite3_bind_null(stmt, 20) }
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw VoiceFlowError.historyUnavailable("save failed: \(lastErrorMessage())")
         }
@@ -133,6 +160,40 @@ public final class SQLiteHistoryStore: HistoryStoring, @unchecked Sendable {
         }
     }
 
+    // MARK: - Targeted field updates
+
+    /// Single-statement UPDATEs, NOT the protocol's read-modify-write default.
+    ///
+    /// The default reads the whole record and REPLACEs it, taking the store lock
+    /// twice with a gap in between. Two writers legitimately race there: the
+    /// correction watcher setting `editedAfterInsert` ~6s after insertion, and
+    /// two-phase delivery writing the refined `cleanText` when a cold LLM takes
+    /// longer than that. Whichever wrote first loses its field to the other's
+    /// stale copy — silently corrupting either the zero-edit metric or the
+    /// delivered text. One statement per field, each atomic under the lock,
+    /// removes the window entirely and leaves every other column untouched.
+    public func setEditedAfterInsert(_ edited: Bool, id: UUID) throws {
+        lock.lock(); defer { lock.unlock() }
+        let stmt = try prepare("UPDATE transcripts SET editedAfterInsert = ? WHERE id = ?;")
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int(stmt, 1, edited ? 1 : 0)
+        bindText(stmt, 2, id.uuidString)
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw VoiceFlowError.historyUnavailable("setEditedAfterInsert failed: \(lastErrorMessage())")
+        }
+    }
+
+    public func updateCleanText(_ text: String, id: UUID) throws {
+        lock.lock(); defer { lock.unlock() }
+        let stmt = try prepare("UPDATE transcripts SET cleanText = ? WHERE id = ?;")
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, text)
+        bindText(stmt, 2, id.uuidString)
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw VoiceFlowError.historyUnavailable("updateCleanText failed: \(lastErrorMessage())")
+        }
+    }
+
     // MARK: - Row mapping
 
     /// Column order matches the CREATE TABLE definition.
@@ -152,10 +213,24 @@ public final class SQLiteHistoryStore: HistoryStoring, @unchecked Sendable {
         let columns = sqlite3_column_count(stmt)
         let insertLatency = columns > 10 ? sqlite3_column_double(stmt, 10) : 0
         let edited = columns > 11 ? sqlite3_column_int(stmt, 11) != 0 : false
+        let transcribe = columns > 12 ? sqlite3_column_double(stmt, 12) : 0
+        let arbiter = columns > 13 ? sqlite3_column_double(stmt, 13) : 0
+        let cleanup = columns > 14 ? sqlite3_column_double(stmt, 14) : 0
+        let engine = columns > 15 ? columnText(stmt, 15) : nil
+        let proposed = columns > 16 ? columnText(stmt, 16) : nil
+        let decision = columns > 17 ? columnText(stmt, 17) : nil
+        let rejectReason = columns > 18 ? columnText(stmt, 18) : nil
+        let confidence: Double? = (columns > 19 && sqlite3_column_type(stmt, 19) != SQLITE_NULL)
+            ? sqlite3_column_double(stmt, 19) : nil
         return TranscriptRecord(
             id: id, rawText: raw, cleanText: clean, appBundleIdentifier: bundle, appName: appName,
             mode: mode, insertionStrategy: strategy, latencySeconds: latency,
             insertLatencySeconds: insertLatency, editedAfterInsert: edited,
+            transcribeSeconds: transcribe, arbiterSeconds: arbiter,
+            cleanupSeconds: cleanup, engineUsed: engine,
+            recognizerConfidence: confidence,
+            cleanupProposed: proposed, cleanupDecision: decision,
+            cleanupRejectReason: rejectReason,
             errorMessage: error, createdAt: created)
     }
 

@@ -1,5 +1,6 @@
 import SwiftUI
 import VoiceFlowCore
+import VoiceFlowWhisper
 
 /// The main app window. A visible, mouse-usable surface for dictation: hold the
 /// big button (or the global hotkey) to talk, switch modes, and see history.
@@ -18,6 +19,11 @@ struct HomeView: View {
                 || !coordinator.accessibilityGranted || !coordinator.inputMonitoringGranted {
                 permissionBanner
             }
+            // The engine-honesty banner. High Accuracy silently not running cost
+            // the user 8 days of degraded transcription with no indication
+            // anywhere — the app must SAY when the engine he chose isn't the
+            // engine he's getting, in the window he actually looks at.
+            EngineHealthBanner(manager: coordinator.whisperManager)
             talkButton
             statusBlock
             modePicker
@@ -226,6 +232,46 @@ struct HomeView: View {
     }
 }
 
+/// Shown ONLY when High Accuracy is enabled but dictations are actually being
+/// served by the fallback engine — downloading, still loading, or failed. Ready
+/// or toggle-off renders nothing. This is the honesty fix for the silent
+/// engine-downgrade defect: the state was always available in Settings, but
+/// nobody opens Settings to discover a problem they don't know they have.
+private struct EngineHealthBanner: View {
+    @ObservedObject var manager: WhisperModelManager
+    @AppStorage(WhisperModelManager.enabledDefaultsKey) private var enabled = false
+
+    var body: some View {
+        if enabled, let text = notice {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text(text).font(.caption)
+                Spacer()
+                if case .failed = manager.state {
+                    Button("Retry") { manager.retry() }.font(.caption)
+                }
+            }
+            .padding(8)
+            .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    private var notice: String? {
+        switch manager.state {
+        case .ready: return nil
+        case .downloading(let f):
+            return "High Accuracy model downloading (\(Int(f * 100))%) — dictating on the standard engine until it's ready."
+        case .preparing:
+            return "High Accuracy model is loading — dictating on the standard engine until it's ready."
+        case .failed(let message):
+            return "High Accuracy is NOT running — dictations use the standard engine. \(message)"
+        case .idle:
+            return "High Accuracy is on but the engine hasn't started — dictations use the standard engine."
+        }
+    }
+}
+
 private struct HistoryCard: View {
     let record: TranscriptRecord
     let onCopy: () -> Void
@@ -267,6 +313,11 @@ private struct HistoryCard: View {
                          ? String(format: "%.1fs to insert", record.insertLatencySeconds)
                          : String(format: "%.1fs", record.latencySeconds))
                         .font(.caption2).foregroundStyle(.tertiary)
+                    // The itemized bill: where those seconds actually went.
+                    if record.transcribeSeconds > 0 {
+                        Text(Self.stageBreakdown(record))
+                            .font(.caption2.monospaced()).foregroundStyle(.tertiary)
+                    }
                     if record.editedAfterInsert {
                         Label("edited", systemImage: "pencil")
                             .font(.caption2).foregroundStyle(.tertiary)
@@ -280,5 +331,22 @@ private struct HistoryCard: View {
         .padding(11)
         .background(.background.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.quaternary))
+    }
+
+    /// "1.4s whisper + 0.9s check + 0.3s polish" — the per-stage bill, shown only
+    /// for the stages that actually cost something. "check" is the second-opinion
+    /// engine (part of the transcribe time, broken out because it is the variable
+    /// cost); "polish" is the cleanup pipeline.
+    static func stageBreakdown(_ record: TranscriptRecord) -> String {
+        var parts: [String] = []
+        let decode = max(0, record.transcribeSeconds - record.arbiterSeconds)
+        parts.append(String(format: "%.1fs %@", decode, record.engineUsed ?? "decode"))
+        if record.arbiterSeconds > 0.05 {
+            parts.append(String(format: "%.1fs check", record.arbiterSeconds))
+        }
+        if record.cleanupSeconds > 0.05 {
+            parts.append(String(format: "%.1fs polish", record.cleanupSeconds))
+        }
+        return parts.joined(separator: " + ")
     }
 }
