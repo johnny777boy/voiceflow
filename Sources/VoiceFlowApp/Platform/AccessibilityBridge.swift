@@ -3,6 +3,24 @@ import ApplicationServices
 
 /// Thin helpers over the AXUIElement C API for reading/writing the focused element.
 enum AX {
+    /// Ask a Chromium/Electron app to build its accessibility tree.
+    ///
+    /// Chat apps (Claude, Slack, VS Code…) run on Chromium, which ships with
+    /// accessibility DISABLED until an assistive client announces itself —
+    /// which is why the correction watcher saw 0 of 40 edits in Claude while
+    /// catching 2 of 2 in Chrome. Setting the documented `AXManualAccessibility`
+    /// attribute on the app element is the official Electron switch for exactly
+    /// this; `AXEnhancedUserInterface` is the older Chromium equivalent. On
+    /// non-Electron apps both writes fail harmlessly.
+    ///
+    /// Best-effort and idempotent; the tree may take a moment to build after
+    /// the first enable, so callers retry their read once.
+    static func enableManualAccessibility(pid: pid_t) {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+    }
+
     /// Copy a string attribute from an element.
     static func string(_ element: AXUIElement, _ attribute: String) -> String? {
         var value: CFTypeRef?
