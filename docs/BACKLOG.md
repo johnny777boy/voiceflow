@@ -627,3 +627,42 @@ accent, and even Wispr slips on them:
 ## Daily use
 Use **Clean Writing** mode (auto-mode picks it). Whisper toggle is OFF (stable Apple
 engine). ~93–95% accuracy on clear speech; the accent tail is the ceiling until Item #1.
+
+## 📊 2026-08-19 — THE FIRST REAL NUMBER, and it refutes the day's main theory
+
+Eight sentences, read into VoiceFlow and then into Wispr Flow, scored against the
+script (`docs/ab-script.txt`). Audio + all three transcripts archived in
+`~/Library/Application Support/VoiceFlow/ab-2026-08-19/`.
+
+| system | WER on his voice |
+|---|---|
+| VoiceFlow (shipping) | **19.0%** |
+| VoiceFlow + full large-v3, same audio | 19.8% |
+| Wispr Flow | **7.8%** |
+
+**His complaint was right and is now measured: we are ~11 points worse, p≈0.049.**
+Wispr sits exactly on the published Whisper accented-English benchmark (7-8%);
+we are more than double it.
+
+**TWO THEORIES DIED TONIGHT, both mine:**
+1. *The model.* Swapping to full large-v3 on the SAME audio changed nothing
+   (19.0 → 19.8). Better on 3 sentences, worse on 2, catastrophic on one
+   ("Chad GPTs and Clot Code"). The ~1.1-point published accent gap is real but
+   is not what is costing us 11 points.
+2. *Quiet capture.* Our recordings peak at 0.15-0.22 where healthy speech peaks
+   0.5-0.9 — but peak-normalising and re-decoding scored IDENTICALLY (18.97%
+   both). WhisperKit already normalises internally.
+
+**So the gap is not the model and not the level.** Remaining suspects, in order:
+the audio path itself (preroll/start clipping — note BOTH Wispr and our big model
+turned "Ask Codex" into "Xcodex", so that clip really does start late), the
+capture format/route, and whatever preprocessing Wispr does that we do not.
+CLAUDE.md rule 6 says never touch the audio path blind — this is the first time
+we are not blind. Investigate with Yoni present, offline on the archived audio
+first, and WER-gate every change against this baseline.
+
+**CONFOUND, stated honestly:** these are two different recordings of each
+sentence — he read to us first, then to Wispr. Second readings are usually
+clearer. Some of the 11 points may be practice effect. To remove it we need
+Wispr to transcribe OUR audio, which their app does not allow. Treat 11 points
+as an upper bound on the true gap.
