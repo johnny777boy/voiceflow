@@ -476,6 +476,15 @@ public enum CleanupGuard {
             // is forgiven here — the negation count is checked separately.
             if heads.contains(word), word.hasSuffix("n"),
                originalSet.contains(String(word.dropLast())) { continue }
+            // Irregular contractions of the negations he uses constantly.
+            // "cannot"→"can't" splits to head "can" (already covered), but
+            // "will not"→"won't" gives the head "wo", which is a word he never
+            // said and no suffix rule can reach. Allowed only when the words it
+            // contracts really were spoken — negation counts are checked
+            // separately, so this cannot smuggle in a negation.
+            if heads.contains(word),
+               let expansion = Self.irregularContractions[word],
+               expansion.allSatisfy({ originalSet.contains($0) }) { continue }
             if word.allSatisfy({ $0.isNumber }) { continue }   // digit sets equal per step 3
             if sharesStem(word, withAnyOf: originalWords) { continue }
             if policy == .grammarRepair {
@@ -497,8 +506,14 @@ public enum CleanupGuard {
         //        removing "um" is the one deletion cleanup is FOR.
         let cleanedWords = allWords(cleaned)
         let cleanedSet = Set(cleanedWords)
+        // Heads of contractions the CLEANED text uses, so a word they legitimately
+        // absorb ("cannot" inside "can't", "will" inside "won't") is not read as
+        // a deletion. The invented-word check above handles the other direction;
+        // both are needed or the same edit is refused coming and going.
+        let cleanedHeads = contractionHeads(cleaned)
         for word in significantWords(original) where !cleanedSet.contains(word) {
             if TextNormalizer.fillerWords.contains(word) { continue }
+            if cleanedHeads.contains(where: { Self.irregularContractions[$0]?.contains(word) == true }) { continue }
             if sharesStem(word, withAnyOf: cleanedWords) { continue }
             if policy == .grammarRepair {
                 if tenseIntact, cleanedWords.contains(where: { sameIrregularVerb(word, $0) }) { continue }
@@ -526,14 +541,33 @@ public enum CleanupGuard {
         // "we"+"nt", "it"+"em", "in"+"to", "us"+"ed". Verb forms that short
         // ("go"→"going") are irregular anyway, and `sameIrregularVerb` knows
         // they are the same verb.
-        guard stem.count >= 3, longer.count > stem.count, longer.hasPrefix(stem) else { return false }
+        guard stem.count >= 3, longer.count > stem.count else { return false }
+
+        // Silent-e verbs: "wire"→"wiring", "tile"→"tiling", "use"→"using".
+        // These are everywhere in his trade and the guard used to reject every
+        // one of them, throwing away the whole dictation with it. The "e" is
+        // dropped before a vowel-initial ending, so the prefix check below
+        // cannot see them.
+        if stem.hasSuffix("e") {
+            let eDropped = String(stem.dropLast())
+            if longer == eDropped + "ing" || longer == eDropped + "ed" { return true }
+        }
+        // Consonant-y verbs: "try"→"tried"/"tries", "dry"→"dried".
+        if stem.hasSuffix("y"), let beforeY = stem.dropLast().last, !"aeiou".contains(beforeY) {
+            let yDropped = String(stem.dropLast())
+            if longer == yDropped + "ied" || longer == yDropped + "ies" { return true }
+        }
+
+        guard longer.hasPrefix(stem) else { return false }
         var suffix = String(longer.dropFirst(stem.count))
         // Regular verbs double the final consonant: "stop"→"stopped",
-        // "ship"→"shipped", "trim"→"trimming". Un-double before matching, but
-        // only the consonant that is actually there — "can"+"not" un-doubles to
-        // "ot", "mat"+"tress" to "ress", and neither is an ending.
+        // "ship"→"shipped", "trim"→"trimming". Un-double before matching —
+        // but ONLY for the verb endings. Allowing "er"/"est" through here
+        // equated "gut"/"gutter", "mat"/"matter", "pot"/"potter": different
+        // words, and on his sites entirely different jobs.
         if let last = stem.last, last.isLetter, !"aeiou".contains(last),
-           suffix.count > 1, suffix.first == last {
+           suffix.count > 1, suffix.first == last,
+           ["ed", "ing"].contains(String(suffix.dropFirst())) {
             suffix.removeFirst()
         }
         if inflectionSuffixes.contains(suffix) { return true }
@@ -567,18 +601,27 @@ public enum CleanupGuard {
     }
 
     /// Every alphanumeric word, lowercased (no length filter).
-    static func allWords(_ text: String) -> [String] {
+    public static func allWords(_ text: String) -> [String] {
         text.lowercased()
             .split { !($0.isLetter || $0.isNumber) }
             .map(String.init)
     }
+
+    /// Contraction heads whose expansion shares no letters with the head.
+    /// Keyed by the head as `allWords` produces it — the apostrophe is a
+    /// separator there, so "won't" yields "won", not "wo".
+    static let irregularContractions: [String: [String]] = [
+        "won": ["will", "not"],      // won't
+        "shan": ["shall", "not"],    // shan't
+        "can": ["cannot"],           // can't, when he said "cannot" as one word
+    ]
 
     /// Letter-runs that immediately PRECEDE an apostrophe: the head half of a
     /// contraction ("don't" → "don", "couldn't" → "couldn"). `allWords` splits
     /// these off as words that were never spoken, so 4a needs to recognise them
     /// — but only the "n't" family, and only when the base word really was
     /// spoken ("don" is allowed only because "do" is in the original).
-    static func contractionHeads(_ text: String) -> Set<String> {
+    public static func contractionHeads(_ text: String) -> Set<String> {
         var heads = Set<String>()
         let lower = Array(text.lowercased())
         for i in lower.indices where lower[i] == "'" || lower[i] == "\u{2019}" {

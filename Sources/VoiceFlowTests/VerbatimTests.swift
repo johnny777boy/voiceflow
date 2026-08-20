@@ -360,6 +360,49 @@ func runVerbatimTests(_ s: TestSuite) {
             original: "the crew finished the deck", cleaned: "the mason's crew finished the deck", policy: p))
     }
 
+    s.test("guard: it must not equate unrelated words via consonant doubling") { s in
+        // Reviewer finding, 2026-08-19. The un-doubling branch forgave
+        // stem + doubled-consonant + inflection, which quietly equated words
+        // that mean completely different jobs on his sites.
+        let p = CleanupGuard.Policy.grammarRepair
+        for (said, proposed) in [
+            ("we need to gut the bathroom this week", "We need to gutter the bathroom this week."),
+            ("the mat is by the door in the hallway", "The matter is by the door in the hallway."),
+            ("put the pot on the counter", "Put the potter on the counter."),
+        ] {
+            s.expectFalse(CleanupGuard.preservesMeaning(original: said, cleaned: proposed, policy: p),
+                          "equated unrelated words: \(proposed)")
+        }
+        // The doubling cases that are REAL must still pass — they are verbs.
+        s.expect(CleanupGuard.preservesMeaning(
+            original: "I stop the water yesterday", cleaned: "I stopped the water yesterday.", policy: p))
+        s.expect(CleanupGuard.preservesMeaning(
+            original: "we ship the tile monday", cleaned: "We shipped the tile Monday.", policy: p))
+    }
+
+    s.test("guard: the repairs a non-native speaker actually needs") { s in
+        // Reviewer finding: the guard REJECTED the exact class of fix
+        // grammarRepair exists to allow, throwing away the whole dictation each
+        // time. Silent-e verbs are everywhere in his trade.
+        let p = CleanupGuard.Policy.grammarRepair
+        for (said, proposed) in [
+            ("we wire the panel tomorrow", "We are wiring the panel tomorrow."),
+            ("we tile the shower next week", "We are tiling the shower next week."),
+            ("we use the same crew", "We are using the same crew."),
+            ("i try to call the city", "I tried to call the city."),
+        ] {
+            s.expect(CleanupGuard.preservesMeaning(original: said, cleaned: proposed, policy: p),
+                     "wrongly refused a real repair: \(proposed)")
+        }
+        // Contractions of the negations he says constantly.
+        s.expect(CleanupGuard.preservesMeaning(
+            original: "i cannot approve that change order",
+            cleaned: "I can't approve that change order.", policy: p))
+        s.expect(CleanupGuard.preservesMeaning(
+            original: "he will not sign the change order",
+            cleaned: "He won't sign the change order.", policy: p))
+    }
+
     s.test("guard: every refusal names its reason (the audit record)") { s in
         let p = CleanupGuard.Policy.grammarRepair
         func why(_ a: String, _ b: String, _ policy: CleanupGuard.Policy = .grammarRepair) -> String? {
