@@ -40,6 +40,8 @@ import VoiceFlowCore
             }
         }
 
+        if CommandLine.arguments.contains("--prove") { proveGuard(); exit(0) }
+
         guard #available(macOS 26.0, *) else {
             print("needs macOS 26 (on-device Foundation Models)"); exit(2)
         }
@@ -144,5 +146,87 @@ import VoiceFlowCore
             print("could not read history at \(url.path)"); return []
         }
         return records.prefix(limit).map(\.rawText)
+    }
+}
+
+
+/// The safety demonstration, in plain English.
+///
+/// Every line below is an edit that CHANGES WHAT THE SPEAKER SAID. The guard is
+/// the only thing standing between the AI and the text in your field, so this
+/// runs each one through the real guard — the same code the app uses — and
+/// shows the verdict. Anything marked LET THROUGH is a live defect.
+///
+///   swift run VoiceFlowReplay --prove
+func proveGuard() {
+    struct Case { let what: String; let said: String; let ai: String }
+    let mustRefuse: [Case] = [
+        .init(what: "cuts a sentence in half, changing the instruction",
+              said: "call me before the meeting we can decide then",
+              ai:   "Call me. Before the meeting we can decide then."),
+        .init(what: "cuts a condition off a promise",
+              said: "I will not send it until you confirm",
+              ai:   "I will not send it. Until you confirm."),
+        .init(what: "deletes a word you said",
+              said: "we need to dig a new well behind the garage",
+              ai:   "We need to dig a new behind the garage."),
+        .init(what: "invents a word you never said",
+              said: "we are done for today",
+              ai:   "We are done well for today."),
+        .init(what: "flips a negation",
+              said: "do not delete the file after review",
+              ai:   "Do delete the file after review."),
+        .init(what: "changes a number",
+              said: "the deposit is 3000 dollars",
+              ai:   "The deposit is 4000 dollars."),
+        .init(what: "reverses who owes whom",
+              said: "you owe me and I owe you",
+              ai:   "You owe you and I owe me."),
+        .init(what: "swaps a preposition, moving money the other way",
+              said: "transfer the deposit to Bob on Friday",
+              ai:   "Transfer the deposit from Bob on Friday."),
+        .init(what: "turns a maybe into a commitment",
+              said: "I might come to the site tomorrow",
+              ai:   "I will come to the site tomorrow."),
+    ]
+    let mustAllow: [Case] = [
+        .init(what: "fixes your grammar without changing your words",
+              said: "he ask me for the invoice yesterday",
+              ai:   "He asked me for the invoice yesterday."),
+        .init(what: "breaks genuine run-on speech honestly",
+              said: "we finished the deck today the crew went home early",
+              ai:   "We finished the deck today. The crew went home early."),
+        .init(what: "removes a filled pause",
+              said: "um we should order the tile on monday",
+              ai:   "We should order the tile on Monday."),
+    ]
+
+    var failures = 0
+    print("\n\u{001B}[1mCan the AI change what you said?\u{001B}[0m  (each line is run through the real guard)\n")
+    for c in mustRefuse {
+        let allowed = CleanupGuard.preservesMeaning(original: c.said, cleaned: c.ai, policy: .grammarRepair)
+        if allowed { failures += 1 }
+        print(allowed ? "  \u{001B}[31mLET THROUGH\u{001B}[0m  \(c.what)" : "  \u{001B}[32mblocked\u{001B}[0m      \(c.what)")
+        print("               you said : \(c.said)")
+        print("               AI wanted: \(c.ai)")
+        if let why = CleanupGuard.rejection(original: c.said, cleaned: c.ai, policy: .grammarRepair) {
+            print("               refused  : \(why)")
+        }
+        print()
+    }
+    print("\u{001B}[1mAnd does it still allow real help?\u{001B}[0m\n")
+    for c in mustAllow {
+        let allowed = CleanupGuard.preservesMeaning(original: c.said, cleaned: c.ai, policy: .grammarRepair)
+        if !allowed { failures += 1 }
+        print(allowed ? "  \u{001B}[32mallowed\u{001B}[0m      \(c.what)" : "  \u{001B}[31mBLOCKED\u{001B}[0m      \(c.what) — too strict")
+        print("               you said : \(c.said)")
+        print("               you get  : \(c.ai)")
+        print()
+    }
+    if failures == 0 {
+        print("\u{001B}[32m\u{001B}[1mAll \(mustRefuse.count + mustAllow.count) checks behaved correctly.\u{001B}[0m")
+        print("The AI cannot change your meaning, and it can still fix your English.\n")
+    } else {
+        print("\u{001B}[31m\u{001B}[1m\(failures) FAILED — do not trust this build.\u{001B}[0m\n")
     }
 }
