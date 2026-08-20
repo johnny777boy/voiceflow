@@ -43,18 +43,22 @@ echo
 echo "${B}[2/5] Waiting for the speech engine to load…${O}"
 echo "  ${D}This matters: anything you dictate before it's ready is NOT saved,${O}"
 echo "  ${D}and that would quietly ruin the whole measurement.${O}"
+# `log` can be shadowed by a shell function, which made this wait forever while
+# the engine had in fact been ready for minutes. Use the real binary, and never
+# leave him stuck: after a minute, just ask him.
 READY=no
-for i in $(seq 1 90); do
-  if log show --last 15m --predicate 'process == "VoiceFlow"' --info 2>/dev/null \
+for i in $(seq 1 15); do
+  if /usr/bin/log show --last 15m --predicate 'process == "VoiceFlow"' --info 2>/dev/null \
      | grep -q "Whisper ready"; then READY=yes; break; fi
-  printf "\r  still loading… %ds" $((i*4)); sleep 4
+  printf "\r  still loading… %ds " $((i*4)); sleep 4
 done
 echo
 if [[ "$READY" != yes ]]; then
-  echo "  ${Y}Couldn't confirm the engine is ready.${O}"
-  echo "  Open VoiceFlow ▸ Settings and check that High Accuracy says Ready,"
-  echo "  then run this again."
-  exit 1
+  echo "  ${Y}Can't confirm automatically — so please look for me:${O}"
+  echo "  Open ${B}VoiceFlow ▸ Settings${O} and find ${B}High Accuracy${O}."
+  read -r -p "  Does it say Ready? [y/N] " ok </dev/tty
+  [[ "$ok" == y || "$ok" == Y ]] || { echo "  Wait for it to say Ready, then run this again."; exit 1; }
+  READY=yes
 fi
 echo "  ${G}engine ready${O}"
 

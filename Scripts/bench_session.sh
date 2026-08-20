@@ -51,7 +51,7 @@ case "${1:-help}" in
     # 85-100% WER, and the verdict reads "no significant difference".
     echo "Waiting for the Whisper engine to finish loading…"
     for i in $(seq 1 60); do
-      if log show --last 10m --predicate 'process == "VoiceFlow"' --info 2>/dev/null \
+      if /usr/bin/log show --last 10m --predicate 'process == "VoiceFlow"' --info 2>/dev/null \
          | grep -q "Whisper ready"; then
         echo "Whisper is ready. Now: Scripts/bench_session.sh prompts"; exit 0
       fi
