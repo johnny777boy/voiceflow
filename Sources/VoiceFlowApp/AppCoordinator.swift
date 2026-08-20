@@ -485,6 +485,32 @@ final class AppCoordinator: ObservableObject {
 
     // MARK: - Suggested vocabulary (Phase 4 — propose, never auto-apply)
 
+    /// Notice words that SOUND like the user's vocabulary but came out spelled
+    /// differently, and count them toward a suggestion.
+    ///
+    /// This replaces guesswork with the app's own observation. The old learning
+    /// path watched the text field for six seconds after insertion and needed an
+    /// Accessibility-readable field, the same app, and no send — measured
+    /// 2026-08-19, it had seen ZERO corrections across 40 dictations in Claude
+    /// (an Electron app) while catching 2 of 2 in Chrome. This signal needs none
+    /// of that: it reads the transcript we already have.
+    ///
+    /// It PROPOSES only. "codecs" and "codices" are real English words, so no
+    /// rule can tell "he said codecs" from "Codex was misheard" — substituting
+    /// would silently destroy a word he meant, which is precisely the failure
+    /// Wispr shipped. He approves an entry once; the deterministic replacer
+    /// handles it forever after.
+    private func noteMisheardVocabulary(in rawText: String) {
+        let detector = PhoneticVocabulary(entries: settings.vocabulary)
+        for miss in detector.nearMisses(in: rawText) {
+            if let ready = suggestionStore.record(
+                WordCorrection(heard: miss.heard, corrected: miss.written)) {
+                Log.cleanup.notice("Vocabulary suggestion ready: \(ready.corrected, privacy: .public)")
+                refreshSuggestions()
+            }
+        }
+    }
+
     func refreshSuggestions() {
         vocabularySuggestions = suggestionStore.readySuggestions()
     }
