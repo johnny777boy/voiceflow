@@ -26,35 +26,104 @@ _UNITS = {"zero":0,"one":1,"two":2,"three":3,"four":4,"five":5,"six":6,"seven":7
           "nineteen":19}
 _TENS = {"twenty":20,"thirty":30,"forty":40,"fifty":50,"sixty":60,"seventy":70,
          "eighty":80,"ninety":90}
+_SCALE = {"hundred":100, "thousand":1000, "million":1000000}
+_ORDINALS = {"first":"1","second":"2","third":"3","fourth":"4","fifth":"5",
+             "sixth":"6","seventh":"7","eighth":"8","ninth":"9","tenth":"10",
+             "eleventh":"11","twelfth":"12","thirteenth":"13","fourteenth":"14",
+             "fifteenth":"15","sixteenth":"16","seventeenth":"17",
+             "eighteenth":"18","nineteenth":"19","twentieth":"20","thirtieth":"30"}
+# Whisper contracts; a read script does not. Scoring that as a mishearing was
+# worth 3.8 WER points on this reference — more than three times the acoustic
+# effect the whole experiment is trying to detect, and NOT symmetric: a
+# 4-layer distilled decoder and a 32-layer one contract at different rates, so
+# it is a model-correlated confound sitting inside a "same audio" experiment.
+_CONTRACTIONS = {
+    "won't":"will not", "can't":"cannot", "cant":"cannot", "n't":" not",
+    "isn't":"is not", "aren't":"are not", "wasn't":"was not",
+    "weren't":"were not", "don't":"do not", "doesn't":"does not",
+    "didn't":"did not", "haven't":"have not", "hasn't":"has not",
+    "hadn't":"had not", "wouldn't":"would not", "shouldn't":"should not",
+    "couldn't":"could not", "we're":"we are", "they're":"they are",
+    "you're":"you are", "i'm":"i am", "he's":"he is", "she's":"she is",
+    "it's":"it is", "that's":"that is", "there's":"there is",
+    "what's":"what is", "let's":"let us", "i'll":"i will", "we'll":"we will",
+    "you'll":"you will", "they'll":"they will", "he'll":"he will",
+    "she'll":"she will", "i've":"i have", "we've":"we have",
+    "you've":"you have", "they've":"they have", "i'd":"i would",
+    "we'd":"we would", "half":"1/2",
+}
+
+def _expand_contractions(text):
+    for short, long in _CONTRACTIONS.items():
+        text = re.sub(rf"(?<![\w']){re.escape(short)}(?![\w'])", long, text)
+    return text
 
 def _numbers_to_digits(words):
-    """Fold spoken numbers into digits so FORMATTING is not scored as mishearing.
+    """Fold spoken numbers, ordinals and scale words into digits.
 
-    "the island is fifty seven inches" and "the island is 57 inches" are the same
-    hearing; only one of them is the app's chosen output format. Without this,
-    every number in the reference costs 1-2 word errors and inflates WER —
-    exactly the noise that swamps the ~1 point the model question turns on.
-    Applied identically to reference and hypothesis, so it can never favour one.
+    FORMATTING IS NOT HEARING. "fifty seven"/"57", "twelve hundred"/"1200",
+    "the fifteenth"/"the 15th", "four oh three"/"403" are the same hearing;
+    only one is the app's output style. Applied identically to reference and
+    hypothesis, so it can never favour one — but leaving it out let 3.8 WER
+    points of pure style dominate a 1.1-point acoustic signal.
     """
     out, i = [], 0
     while i < len(words):
         w = words[i]
+        if w in _ORDINALS:
+            out.append(_ORDINALS[w]); i += 1; continue
+        # "<n>th" spoken as a digit ordinal, e.g. "15th" -> "15"
+        m = re.fullmatch(r"(\d+)(st|nd|rd|th)", w)
+        if m:
+            out.append(m.group(1)); i += 1; continue
+        value, consumed = None, 0
         if w in _TENS:
-            value = _TENS[w]
+            value = _TENS[w]; consumed = 1
             if i + 1 < len(words) and words[i + 1] in _UNITS and 1 <= _UNITS[words[i + 1]] <= 9:
-                value += _UNITS[words[i + 1]]; i += 1
-            out.append(str(value))
+                value += _UNITS[words[i + 1]]; consumed = 2
         elif w in _UNITS:
-            # "one hundred" style compounds are left alone: they are rare in his
-            # speech and guessing at them would introduce errors of its own.
-            out.append(str(_UNITS[w]))
+            value = _UNITS[w]; consumed = 1
+        elif w.isdigit():
+            value = int(w); consumed = 1
+        if value is not None:
+            # Scale words: "twelve hundred" -> 1200, "ninety four thousand" -> 94000.
+            if i + consumed < len(words) and words[i + consumed] in _SCALE:
+                value *= _SCALE[words[i + consumed]]
+                consumed += 1
+            out.append(str(value)); i += consumed; continue
+        # "four oh three" -> "403": digits joined by spoken zeros.
+        out.append(w); i += 1
+    # Whether currency is spoken ("twelve hundred dollars") or symbolised
+    # ("$1,200") is formatting; the NUMBER is the content. Dropping the currency
+    # word after a digit makes the two forms comparable in both directions. The
+    # cost is that a genuinely missed "dollars" goes unscored — an acceptable
+    # trade for removing a model-correlated confound, and stated here so nobody
+    # rediscovers it as a bug.
+    folded = []
+    for token in out:
+        if token in ("dollars", "dollar", "bucks") and folded and folded[-1].isdigit():
+            continue
+        folded.append(token)
+    out = folded
+
+    # Second pass: join a run of bare digits that spell one number ("4 oh 3").
+    joined, i = [], 0
+    while i < len(joined_src := out):
+        if (joined_src[i].isdigit() and i + 2 < len(joined_src)
+                and joined_src[i + 1] in ("oh", "o", "0")
+                and joined_src[i + 2].isdigit()):
+            joined.append(joined_src[i] + "0" + joined_src[i + 2]); i += 3
         else:
-            out.append(w)
-        i += 1
-    return out
+            joined.append(joined_src[i]); i += 1
+    return joined
 
 def normalize(text):
     text = text.lower()
+    text = text.replace("\u2019", "'")              # curly apostrophe
+    text = re.sub(r"(\d),(\d)", r"\1\2", text)       # 1,200 -> 1200
+    text = re.sub(r"\$\s*([\d.]+)", r"\1", text)          # $1,200 -> 1200
+    text = re.sub(r"([\d.]+)\s*%", r"\1 percent", text)
+    text = _expand_contractions(text)
     text = re.sub(r"[^\w\s']", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return _numbers_to_digits(text.split())
@@ -159,6 +228,23 @@ def main():
         diffs.append((sum(p[1] for p in sample) - sum(p[0] for p in sample)) / w * 100)
     diffs.sort()
     lo, hi = diffs[int(0.025 * len(diffs))], diffs[int(0.975 * len(diffs))]
+    # THE HONEST HEADLINE. An underpowered test reports "not significant" for a
+    # real effect most of the time, and this project's plan pre-authorised
+    # reading that as "the claim is falsified for his voice" — which converts a
+    # null result into a positive claim. So state up front what this sample can
+    # actually see. Half the CI width is the smallest difference that could
+    # clear zero here.
+    floor = (hi - lo) / 2
+    print(f"  RESOLVING POWER: this sample can only detect differences larger")
+    print(f"  than about {floor:.1f} points. Anything smaller will read as")
+    print(f"  \"not significant\" EVEN IF IT IS REAL — that is not evidence of a tie.")
+    if floor > 1.0:
+        print(f"  The model question turns on ~1.1 points, so {n} utterances /"
+              f" {words} words is")
+        print(f"  NOT ENOUGH to settle it. Read more (aim for ~250 utterances /"
+              f" ~3000 words),")
+        print(f"  or decide on the published prior instead of this run.")
+    print()
     # Two-sided p: how often the resampled difference lands on the other side of 0.
     worse = sum(1 for d in diffs if d >= 0) if wer_b < wer_a else sum(1 for d in diffs if d <= 0)
     p = 2 * worse / len(diffs)
@@ -178,5 +264,41 @@ def main():
         print(f"    {label_b:<26} {eb:6.1f}%   ({ent[1]}/{ent[2]})")
         print(f"    This is where context biasing shows up; overall WER barely moves.")
 
+# Perfect hearing, ordinary model formatting. Every pair MUST score zero — if any
+# of them costs a word error, the scorer is measuring output style instead of
+# whether the engine heard him, and style differs BY MODEL (a 4-layer decoder
+# contracts less than a 32-layer one), so it lands as a confound three times the
+# size of the effect being measured.
+SELF_TEST_PAIRS = [
+    ("I will not send it until you confirm", "I won't send it until you confirm."),
+    ("We are using Next.js and PostgreSQL", "We're using Next.js and PostgreSQL."),
+    ("we are twelve hundred dollars over budget", "We're $1,200 over budget."),
+    ("let the client know it arrives on the fifteenth", "Let the client know it arrives on the 15th."),
+    ("the API returns a four oh three", "The API returns a 403."),
+    ("the bid came in at ninety four thousand", "The bid came in at $94,000."),
+    ("three more sheets of half inch drywall", "Three more sheets of 1/2 inch drywall."),
+    ("the island is fifty seven by thirty five inches", "The island is 57 by 35 inches."),
+    ("do not order the flooring", "Don't order the flooring."),
+    ("make sure the HVAC return is not blocked", "Make sure the HVAC return isn't blocked."),
+    ("he cannot rough in until the plumber is done", "He can't rough in until the plumber is done."),
+    ("so they are remaking the two casements", "So they're remaking the two casements."),
+]
+
+def self_test():
+    failures = []
+    for said, formatted in SELF_TEST_PAIRS:
+        e, n = edits(normalize(said), normalize(formatted))
+        if e: failures.append((said, formatted, e, normalize(said), normalize(formatted)))
+    if failures:
+        print("SCORER SELF-TEST FAILED — it is measuring formatting, not hearing:\n")
+        for said, formatted, e, a, b in failures:
+            print(f"  {e} error(s)\n    said : {said}\n    got  : {formatted}\n"
+                  f"    ref norm: {a}\n    hyp norm: {b}\n")
+        return 1
+    print(f"scorer self-test: {len(SELF_TEST_PAIRS)} formatting pairs all score 0.00 WER")
+    return 0
+
 if __name__ == "__main__":
+    if "--self-test" in sys.argv:
+        sys.exit(self_test())
     main()

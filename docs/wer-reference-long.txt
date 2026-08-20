@@ -48,3 +48,107 @@ Send the lien release to the title company before the closing date.
 The insurance adjuster is coming Wednesday to look at the water damage.
 We finished the deck today and the crew went home early for once.
 Remind me to call the supplier about the backordered light fixtures.
+The plumber needs the rough in inspection before we close the walls.
+I asked the supplier to hold the tile until the deposit clears.
+The garage slab has a crack that we should seal before the epoxy.
+We need a dumpster on site Monday morning for the demo debris.
+The client changed her mind about the backsplash again this week.
+Tell the crew to protect the hardwood before they move the cabinets.
+The attic insulation is not up to code so we have to redo it.
+I need the framing inspection scheduled for Thursday if possible.
+The stair railing has to be forty two inches above the tread.
+We are waiting on the structural engineer to size the header.
+The gas line needs a permit from the city before anyone touches it.
+I want the electrical panel moved to the outside wall of the garage.
+The shower pan test has to sit overnight before the inspector comes.
+Order two more boxes of the twelve by twenty four porcelain tile.
+The sump pump discharge cannot drain onto the neighbor's property.
+We found asbestos in the popcorn ceiling so abatement comes first.
+The countertop template is scheduled for the day after cabinet install.
+I told the painter to use satin on the trim and flat on the ceilings.
+The window well needs a cover before the final inspection passes.
+Our framing crew starts at seven so tell the neighbors in advance.
+The roof pitch is too shallow for the shingles the client picked.
+We need to relocate the hose bib before the stucco goes on.
+The foundation needs a French drain along the uphill side.
+I am not comfortable signing off until the engineer looks at it.
+The tile setter wants the shower niche framed before he starts.
+We should photograph the plumbing before the drywall covers it.
+The city inspector red tagged the job for a missing handrail.
+Send the revised drawings to the homeowner for approval today.
+The cabinet hardware is on backorder for another three weeks.
+I need a change order signed before we do any extra work.
+The subcontractor invoice does not match the agreed scope.
+We are pulling the electrical permit under the same job number.
+The hardwood needs to acclimate in the house for five days.
+Ask the HVAC guy if the return can go in the hallway ceiling.
+The exterior grade has to slope away from the foundation.
+I want photos of every stage for the project documentation.
+The tankless water heater needs a bigger gas line than we ran.
+We should schedule the final walkthrough for the end of the month.
+The client is asking about a warranty on the labor and materials.
+Make sure the shut off valves are accessible behind the vanity.
+Run the migration on the staging database before you touch production.
+The pull request has three failing tests on the TypeScript build.
+Ask Claude Code to write the tests before it writes the fix.
+The GitHub action needs a secret for the deployment token.
+We should cache the Payload CMS query so the page loads faster.
+The PostgreSQL index is missing on the created at column.
+I want the Next.js routes documented before we hand this off.
+The API rate limit is two hundred requests per minute.
+Check the error logs on the production server this afternoon.
+Codex flagged a race condition in the background sync code.
+The build pipeline takes nineteen minutes which is too long.
+We need a rollback plan before we deploy on a Friday.
+The environment variables are not set on the staging box.
+Ask VS Code to run the formatter on the whole repository.
+The JavaScript bundle grew by four hundred kilobytes last week.
+I reviewed the diff and left comments on the schema change.
+The test suite is flaky on the authentication module.
+We should add monitoring before this goes to real customers.
+The database backup ran but nobody verified it restores.
+Write the documentation while the decisions are still fresh.
+My wife asked whether the island can seat four people comfortably.
+The dog gate needs to go at the top of the basement stairs.
+I promised the client we would be done before Thanksgiving.
+The neighbor complained about the trucks blocking the driveway.
+We should walk the site together before the crew arrives Monday.
+The lumber prices went up again so the estimate needs updating.
+I met with the inspector and he wants the joist hangers doubled.
+The tile guy is out sick so the schedule slips two days.
+Call the supplier and ask about the delayed vanity shipment.
+The homeowner wants to add a skylight over the kitchen sink.
+We cannot start the demo until the utilities are disconnected.
+The permit expires in ninety days so we need to move faster.
+I want a written scope for the landscaping before we commit.
+The retaining wall needs to be engineered above four feet.
+Send me the material list so I can price it out tonight.
+The concrete truck is scheduled for six in the morning.
+We need to protect the finished floors before the trim carpenters.
+The client asked for an itemized breakdown of the plumbing costs.
+I told him the timeline depends on when the cabinets arrive.
+The bathroom fan has to vent outside not into the attic.
+We should replace the shutoff valves while the wall is open.
+The old wiring is knob and tube so the whole circuit gets replaced.
+I need three bids on the roofing before we pick a contractor.
+The city wants a site survey before they issue the permit.
+Ask the designer to send the tile layout with dimensions.
+The crew found rot in the sill plate under the back window.
+We are going to need a temporary power pole for the addition.
+The homeowner insurance requires photos before and after.
+Schedule the pest inspection before we close up the crawl space.
+I want the punch list finished before the final payment.
+The garage door opener needs a dedicated circuit from the panel.
+We should confirm the appliance dimensions before the cabinets ship.
+The client wants under cabinet lighting on a separate switch.
+Tell the framer the door rough opening is off by an inch.
+The septic system has to be inspected before the sale closes.
+I need to order the trim before the price increase next month.
+The stair treads should be solid oak to match the floor.
+We are meeting the architect on site Wednesday at nine.
+The shower valve has to be set before the tile backer goes up.
+Make sure the smoke detectors are interconnected on every floor.
+I want a moisture reading on the slab before the flooring goes down.
+The kitchen sink base needs to be modified for the farmhouse sink.
+We should get the electrical rough in done before the holiday.
+The client approved the quartz but wants a different edge profile.

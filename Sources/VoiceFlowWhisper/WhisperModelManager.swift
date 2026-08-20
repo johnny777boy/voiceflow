@@ -281,10 +281,15 @@ public final class WhisperModelManager: ObservableObject {
     ///
     /// Downloads if the variant is not present, which is exactly what a model
     /// A/B needs the first time it runs.
+    /// Returns the pipeline AND the folder it was actually loaded from, so a
+    /// caller can PROVE which weights are running. Nothing in WhisperKit's API
+    /// distinguishes turbo from full large-v3 after loading (same dims,
+    /// different decoder depth), and this project has already had one A/B that
+    /// would have compared turbo with turbo.
     public static func loadPipeline(
         variant: String,
         onDownloadProgress: (@Sendable (Double) -> Void)? = nil
-    ) async throws -> WhisperKit {
+    ) async throws -> (pipeline: WhisperKit, folder: URL) {
         let folder = try await WhisperKit.download(
             variant: variant,
             downloadBase: downloadBase(),
@@ -299,7 +304,14 @@ public final class WhisperModelManager: ObservableObject {
             load: true,
             download: false
         )
-        return try await WhisperKit(config)
+        // `HubApi.snapshot` returns a PARTIAL folder instead of throwing when a
+        // download is interrupted. The app path guards this; this one must too,
+        // or a half-downloaded model loads and silently decodes differently.
+        guard folder.lastPathComponent == variant else {
+            throw VoiceFlowError.audioEngineFailure(
+                "resolved folder \(folder.lastPathComponent) does not match variant \(variant)")
+        }
+        return (try await WhisperKit(config), folder)
     }
 
     /// ~/Library/Application Support/VoiceFlow/Models — NOT the WhisperKit default

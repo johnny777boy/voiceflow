@@ -64,18 +64,41 @@ import VoiceFlowWhisper
         // The experiment decodes this audio again under the other model.
         transcriber.retainCaptureFile = true
         do {
-            let pipeline = try await WhisperModelManager.loadPipeline(variant: model) { fraction in
+            let (pipeline, folder) = try await WhisperModelManager.loadPipeline(variant: model) { fraction in
                 FileHandle.standardError.write("  downloading \(Int(fraction * 100))%\r".data(using: .utf8)!)
             }
             transcriber.adopt(pipeline)
+            // PROVE which weights are running. The decoder size is the tell:
+            // turbo has 4 decoder layers, full large-v3 has 32, so they differ
+            // by roughly 5x on disk. Printing the requested name would prove
+            // nothing — that is exactly how a turbo-vs-turbo A/B passes for real.
+            // PROVE which weights are running, from the model's own config.
+            // File size does NOT distinguish them: measured 2026-08-19, turbo
+            // and the v20240930 build have byte-identical 328 MB decoders. Only
+            // `decoder_layers` tells the truth — full large-v3 has 32, every
+            // turbo build has 4. This check exists because the project has now
+            // been caught THREE times naming a turbo build as full large-v3.
+            var layers = "unknown"
+            if let data = try? Data(contentsOf: folder.appendingPathComponent("config.json")),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let n = json["decoder_layers"] as? Int {
+                layers = String(n)
+                if n <= 8 {
+                    FileHandle.standardError.write(
+                        "  NOTE: \(n) decoder layers — this is a DISTILLED (turbo) build.\n"
+                            .data(using: .utf8)!)
+                }
+            }
+            let proof = "  loaded from   : \(folder.path)\n  decoder layers: \(layers)"
+                + "  (full large-v3 = 32, turbo = 4 — these MUST differ between the two runs)\n"
+            FileHandle.standardError.write(proof.data(using: .utf8)!)
         } catch {
             print("failed to load \(model): \(error)")
             exit(1)
         }
-        FileHandle.standardError.write("decoding \(files.count) file(s)…\n".data(using: .utf8)!)
-        FileHandle.standardError.write(
-            "note: silence arbiter not wired here — short clips may score empty; "
-            + "comparisons stay valid, absolute WER is not the app's\n".data(using: .utf8)!)
+        let note = "decoding \(files.count) file(s)…\nnote: silence arbiter not wired here"
+            + " — short clips may score empty; comparisons stay valid, absolute WER is not the app's\n"
+        FileHandle.standardError.write(note.data(using: .utf8)!)
 
         var lines: [String] = []
         var totalSeconds = 0.0
@@ -103,12 +126,32 @@ import VoiceFlowWhisper
 
         let body = lines.joined(separator: "\n") + "\n"
         if let out {
-            try? body.write(toFile: out, atomically: true, encoding: .utf8)
+            // A swallowed write failure means the next step scores LAST WEEK's
+            // file with full statistical confidence.
+            do { try body.write(toFile: out, atomically: true, encoding: .utf8) }
+            catch {
+                FileHandle.standardError.write("FATAL: could not write \(out): \(error)\n".data(using: .utf8)!)
+                exit(4)
+            }
             FileHandle.standardError.write("wrote \(out)\n".data(using: .utf8)!)
         } else {
             print(body, terminator: "")
         }
+        // Confirm a prompt actually reached the decoder. Biasing silently
+        // failing to engage looks identical to biasing not helping — and that
+        // exact confusion cost this project eight days.
         let bias = biasTerms.isEmpty ? "none" : "\(biasTerms.count) terms"
+        if !biasTerms.isEmpty {
+            let enabled = UserDefaults.standard.bool(forKey: "whisperPromptBiasingEnabled")
+            if !enabled {
+                FileHandle.standardError.write(
+                    "FATAL: --bias was passed but whisperPromptBiasingEnabled is not set, so NO prompt was fed. Re-run with -whisperPromptBiasingEnabled YES\n"
+                        .data(using: .utf8)!)
+                exit(3)
+            }
+            let prompt = TranscriptionContext(vocabularyTerms: biasTerms).promptText()
+            FileHandle.standardError.write("  bias prompt : \(prompt)\n".data(using: .utf8)!)
+        }
         FileHandle.standardError.write(
             String(format: "model=%@  bias=%@  files=%d  decode=%.1fs total (%.2fs mean)\n",
                    model, bias, files.count, totalSeconds,
