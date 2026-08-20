@@ -444,6 +444,36 @@ func runVerbatimTests(_ s: TestSuite) {
                       "no no no do not do that")
     }
 
+    s.test("stutters: a sentence boundary is not a stutter") { s in
+        // Reviewer finding, 2026-08-19. The comparison stripped punctuation
+        // before matching, so it collapsed ACROSS sentences and deleted a
+        // subject: "It is up to you. You decide." lost the second "You".
+        // This is a word deletion with no guard above it — CleanupGuard only
+        // ever sees the ALREADY-collapsed text — so it must be right here.
+        s.expectEqual(TextNormalizer.collapseStutters("It is up to you. You decide."),
+                      "It is up to you. You decide.")
+        s.expectEqual(TextNormalizer.collapseStutters("Tell them that. That is the plan."),
+                      "Tell them that. That is the plan.")
+        s.expectEqual(TextNormalizer.collapseStutters("We are done, I I think"),
+                      "We are done, I think")
+        // A real stutter inside one clause is still collapsed.
+        s.expectEqual(TextNormalizer.collapseStutters("I I think we we should go"),
+                      "I think we should go")
+    }
+
+    s.test("raw mode does not delete repeated words either") { s in
+        // Raw/off is the TRUE verbatim path — the mode a WER benchmark runs in.
+        // A deletion here corrupts both the promise and the measurement.
+        let rules = RuleBasedCleanup()
+        for mode in [DictationMode.raw] {
+            s.expectEqual(rules.cleanSync("I I think we we should go", context: ctx(mode)),
+                          "I I think we we should go")
+        }
+        s.expectEqual(rules.cleanSync("I I think we we should go",
+                                      context: ctx(.cleanWriting, strength: .off)),
+                      "I I think we we should go")
+    }
+
     s.test("fillers: the load-bearing words are NOT in the filler list") { s in
         // Each of these was proposed as a filler and each is meaningful in his
         // work: "dig a new well", "the framing is okay", "turn right",

@@ -16,8 +16,11 @@ regression corpus and real WER data on your own voice.
 import argparse, datetime, difflib, json, os, sqlite3, sys
 
 DB = os.path.expanduser("~/Library/Application Support/VoiceFlow/history.sqlite")
-CORPUS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                      "docs", "bad-dictations.jsonl")
+# NOT in the repo. These lines contain the verbatim text of real dictations —
+# client names, addresses, prices, change orders. docs/ is tracked and the merge
+# ritual pushes the branch to GitHub, so one `git add -A` would publish them.
+# They live with the rest of the local-only data instead.
+CORPUS = os.path.expanduser("~/Library/Application Support/VoiceFlow/bad-dictations.jsonl")
 BOLD, RED, GRN, YEL, DIM, OFF = "\033[1m", "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 
 def rows(limit):
@@ -111,7 +114,7 @@ def main():
             "reason": r.get("cleanupRejectReason"), "engine": r["engineUsed"],
             "verdicts": verdicts}, ensure_ascii=False) + "\n")
     n = sum(1 for _ in open(CORPUS))
-    print(f"\n{DIM}saved to docs/bad-dictations.jsonl ({n} reports) — this is now a"
+    print(f"\n{DIM}saved to {CORPUS} ({n} reports) — this is now a"
           f" regression case and WER data on your voice.{OFF}\n")
 
 if __name__ == "__main__":

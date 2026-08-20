@@ -53,7 +53,18 @@ public final class WhisperModelManager: ObservableObject {
     }
 
     public nonisolated static let enabledDefaultsKey = "useWhisperEngine"
-    private nonisolated static let modelFolderDefaultsKey = "whisperModelFolderPath"
+    /// Cached model folder, KEYED BY VARIANT.
+    ///
+    /// It used to be one shared key, and that made the model A/B a lie: setting
+    /// `whisperModelVariant` to full large-v3 skipped the download, loaded the
+    /// cached TURBO `.mlmodelc` files under the new name, resolved the (identical)
+    /// tokenizer, reported ready — and the user dictated on turbo believing he
+    /// was on large-v3. Nothing errored, because both variants share a tokenizer.
+    /// Exactly the shape of plausible-but-false result this project has already
+    /// been burned by twice.
+    private nonisolated static func modelFolderDefaultsKey(for variant: String) -> String {
+        "whisperModelFolderPath.\(variant)"
+    }
 
     private let transcriber: WhisperKitTranscriber
     private var task: Task<Void, Never>?
@@ -229,7 +240,7 @@ public final class WhisperModelManager: ObservableObject {
             try Task.checkCancellation()
             transcriber.adopt(pipeline)
             // Only a folder that produced a WORKING pipeline is remembered.
-            UserDefaults.standard.set(folder.path, forKey: Self.modelFolderDefaultsKey)
+            UserDefaults.standard.set(folder.path, forKey: Self.modelFolderDefaultsKey(for: Self.modelVariant))
             state = .ready
             Log.transcription.notice("Whisper ready — high-accuracy engine active")
         } catch {
@@ -241,7 +252,7 @@ public final class WhisperModelManager: ObservableObject {
                 // Forget a cached folder that failed to load (corrupt/partial):
                 // the next attempt re-runs the download, which cheaply resumes/
                 // verifies existing files instead of retrying a doomed load.
-                UserDefaults.standard.removeObject(forKey: Self.modelFolderDefaultsKey)
+                UserDefaults.standard.removeObject(forKey: Self.modelFolderDefaultsKey(for: Self.modelVariant))
                 let message = (error as NSError).localizedDescription
                 Log.transcription.error("Whisper setup failed: \(String(describing: error), privacy: .public)")
                 state = .failed(message)
@@ -300,10 +311,18 @@ public final class WhisperModelManager: ObservableObject {
     /// A previously completed download, verified to still contain compiled
     /// Core ML models (so a half-deleted folder re-downloads instead of failing).
     private static func cachedModelFolder() -> URL? {
-        guard let path = UserDefaults.standard.string(forKey: modelFolderDefaultsKey),
+        let variant = modelVariant
+        guard let path = UserDefaults.standard.string(forKey: modelFolderDefaultsKey(for: variant)),
               let children = try? FileManager.default.contentsOfDirectory(atPath: path),
               children.contains(where: { $0.hasSuffix(".mlmodelc") })
         else { return nil }
+        // Belt and braces: the folder WhisperKit downloads is named after the
+        // variant, so a path that does not contain it is a cache from another
+        // model and must be treated as a miss rather than loaded silently.
+        guard URL(fileURLWithPath: path).lastPathComponent == variant else {
+            Log.transcription.error("Cached model folder \(path, privacy: .public) does not match variant \(variant, privacy: .public) — re-resolving")
+            return nil
+        }
         return URL(fileURLWithPath: path)
     }
 }

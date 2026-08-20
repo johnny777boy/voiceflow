@@ -85,8 +85,17 @@ def entity_counts(ref, hyp, entities):
     return hit, total
 
 def load(path):
+    """Every line, blanks included.
+
+    The bench writes an EMPTY line for a decode that produced nothing, precisely
+    so line N keeps meaning utterance N. Dropping blanks here would shift every
+    later pair by one and score ~100% WER on all of them — then report, with a
+    tight confidence interval, that the other model is dramatically better. That
+    is the confident-wrong-answer this whole file exists to prevent. A blank
+    hypothesis is a real scoring unit (all deletions), not an absent one.
+    """
     with open(path) as f:
-        return [line.rstrip("\n") for line in f if line.strip() != ""]
+        return [line.rstrip("\n") for line in f]
 
 def main():
     ap = argparse.ArgumentParser()
@@ -97,12 +106,19 @@ def main():
     a = ap.parse_args()
 
     ref, ha, hb = load(a.reference), load(a.hyp_a), load(a.hyp_b)
-    n = min(len(ref), len(ha), len(hb))
-    if not (len(ref) == len(ha) == len(hb)):
-        print(f"WARNING: line counts differ (ref {len(ref)}, A {len(ha)}, B {len(hb)}) — "
-              f"scoring the first {n}. Pairing by line is the whole design, so an "
-              f"unequal count usually means a missing dictation, not a tie.\n")
-    ref, ha, hb = ref[:n], ha[:n], hb[:n]
+    # Trailing blank lines from the file's final newline are not utterances.
+    while ref and not ref[-1].strip(): ref.pop()
+    if len(ref) != len(ha) or len(ref) != len(hb):
+        sys.exit(
+            f"REFUSING TO SCORE: line counts differ (reference {len(ref)}, "
+            f"{a.hyp_a} {len(ha)}, {a.hyp_b} {len(hb)}).\n"
+            f"Pairing line N with utterance N IS the design — scoring a mismatched "
+            f"set silently compares different sentences and produces a confident "
+            f"wrong answer. Re-record the session, or trim the files so every line "
+            f"corresponds.")
+    n = len(ref)
+    if n == 0:
+        sys.exit("REFUSING TO SCORE: nothing to compare (empty corpus).")
     label_a, label_b = (a.labels.split(",") + ["A", "B"])[:2]
 
     entities = set()

@@ -13,9 +13,6 @@ public struct RuleBasedCleanup: CleanupProviding {
     /// Synchronous entry point (the engine does no async work; exposed for tests
     /// and for callers that want the deterministic result directly).
     public func cleanSync(_ rawText: String, context: CleanupContext) -> String {
-        // Stutters go before everything: deterministic, unit-tested, and never
-        // left to the model to guess at.
-        let rawText = TextNormalizer.collapseStutters(rawText)
         // Raw mode / cleanup-off are a TRUE verbatim path: whitespace tidy only.
         // Vocabulary substitution must NOT run here — it rewrites words the user
         // actually spoke ("postgres" → "PostgreSQL"), which corrupts both the
@@ -23,6 +20,13 @@ public struct RuleBasedCleanup: CleanupProviding {
         if context.strength == .off || context.mode == .raw {
             return TextNormalizer.normalizeWhitespace(rawText)
         }
+
+        // Stutters are deterministic and unit-tested, but they DELETE a word, so
+        // they run only once the verbatim path above has returned. They used to
+        // run before it, which meant Raw mode — the mode a WER benchmark uses,
+        // and the mode that promises not one word changed — silently dropped
+        // repeats.
+        let rawText = TextNormalizer.collapseStutters(rawText)
 
         // 1. Vocabulary substitution (user's spoken→written mappings).
         let replacer = VocabularyReplacer(entries: context.vocabulary)

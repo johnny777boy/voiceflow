@@ -51,7 +51,14 @@ public enum TextNormalizer {
             let bare = token.lowercased().filter { $0.isLetter }
             if let previous = out.last {
                 let previousBare = previous.lowercased().filter { $0.isLetter }
-                if !bare.isEmpty, bare == previousBare, closedClass.contains(bare) {
+                // A word that ENDS a sentence is not the first half of a
+                // stutter. Stripping punctuation before comparing made "It is
+                // up to you. You decide." lose its second subject — a deleted
+                // word, in the one edit that has no guard above it (CleanupGuard
+                // only ever sees the already-collapsed text).
+                let previousEndsSentence = previous.last.map { ".!?:;,".contains($0) } ?? false
+                if !bare.isEmpty, bare == previousBare, closedClass.contains(bare),
+                   !previousEndsSentence {
                     continue   // drop the repeat, keep the first
                 }
             }
