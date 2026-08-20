@@ -3,6 +3,19 @@
 ## ▶️ RESUME HERE (2026-08-19)
 
 
+**2026-08-19 RESEARCH — read `docs/RESEARCH-ACCURACY-FIX.md` first.** He said
+Whisper hears him 99% correctly and we do not. We run Whisper too — but the
+**turbo** build (decoder truncated 32→4 layers). OpenAI's benchmarks: full
+large-v3 is ~0.2 WER better on clean English and **~1.1 WER better on accented
+English**. He is a non-native speaker, so we picked the model whose distillation
+costs him the most, and never WER-gated it. The A/B needs no code:
+`defaults write com.voiceflow.dictation whisperModelVariant -string
+"openai_whisper-large-v3-v20240930"`. (The old source comment named
+`openai_whisper-large-v3_turbo` as "full large-v3" — FALSE, every `*_turbo`
+folder is turbo; that A/B would have compared turbo with turbo. Corrected.)
+Also: the promptTokens bug that disabled biasing is upstream issue #372, FIXED
+in PR #514, shipping in WhisperKit v1.1.0 — we are pinned at 0.18.0.
+
 **PROOF IN ONE COMMAND (2026-08-19):** `swift run VoiceFlowReplay --prove`
 runs 12 dangerous edits through the REAL guard and prints plain-English
 verdicts — 9 that must be blocked (severed clause, deleted word, invented word,
