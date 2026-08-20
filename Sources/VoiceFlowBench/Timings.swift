@@ -13,6 +13,7 @@ import VoiceFlowWhisper
 /// This dumps what we were throwing away, so prosody-first segmentation can be
 /// judged on his real speech before any of it is built.
 @available(macOS 26.0, *)
+@MainActor
 func printTimings(audio: String, model: String) async throws {
     let (pipeline, _) = try await WhisperModelManager.loadPipeline(variant: model)
     let samples = try AudioProcessor.loadAudioAsFloatArray(fromPath: audio)
