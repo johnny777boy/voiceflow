@@ -164,10 +164,20 @@ Plus two scoring extensions:
 
 ### d.1 Model A/B: turbo vs full large-v3 (largest single lever, zero code)
 
-`defaults write com.voiceflow.dictation whisperModelVariant -string "openai_whisper-large-v3-v20240930"`,
+`defaults write com.voiceflow.dictation whisperModelVariant -string "openai_whisper-large-v3"`,
 re-run the paired protocol. Expected: ~1 point WER gain on his accented speech
 ([whisper #2363](https://github.com/openai/whisper/discussions/2363)) at real
 latency cost (32-layer vs 4-layer decoder).
+
+> **CORRECTED 2026-08-19 (third instance of this trap).**
+> `openai_whisper-large-v3-v20240930` reports `decoder_layers: 4` — it is TURBO;
+> `v20240930` is the turbo release date. The real full model is
+> **`openai_whisper-large-v3`** (`decoder_layers: 32`), verified against the
+> published config. File size cannot tell them apart (both decoders are 328 MB),
+> so `VoiceFlowBench` now reads `decoder_layers` from the model's own config and
+> prints it, and `bench_session.sh` refuses to score byte-identical outputs.
+
+
 
 **Gate:** ship full large-v3 as default only if paired WER is significantly better
 on his voice AND p95 dictation latency stays acceptable to Yoni living on it. If

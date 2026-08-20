@@ -65,11 +65,21 @@ large-v3 is ~0.2 WER better on clean English and **~1.1 WER better on accented
 English**. He is a non-native speaker, so we picked the model whose distillation
 costs him the most, and never WER-gated it. The A/B needs no code:
 `defaults write com.voiceflow.dictation whisperModelVariant -string
-"openai_whisper-large-v3-v20240930"`. (The old source comment named
+"openai_whisper-large-v3"`. (The old source comment named
 `openai_whisper-large-v3_turbo` as "full large-v3" — FALSE, every `*_turbo`
 folder is turbo; that A/B would have compared turbo with turbo. Corrected.)
 Also: the promptTokens bug that disabled biasing is upstream issue #372, FIXED
 in PR #514, shipping in WhisperKit v1.1.0 — we are pinned at 0.18.0.
+
+> **CORRECTED 2026-08-19 (third instance of this trap).**
+> `openai_whisper-large-v3-v20240930` reports `decoder_layers: 4` — it is TURBO;
+> `v20240930` is the turbo release date. The real full model is
+> **`openai_whisper-large-v3`** (`decoder_layers: 32`), verified against the
+> published config. File size cannot tell them apart (both decoders are 328 MB),
+> so `VoiceFlowBench` now reads `decoder_layers` from the model's own config and
+> prints it, and `bench_session.sh` refuses to score byte-identical outputs.
+
+
 
 **PROOF IN ONE COMMAND (2026-08-19):** `swift run VoiceFlowReplay --prove`
 runs 12 dangerous edits through the REAL guard and prints plain-English

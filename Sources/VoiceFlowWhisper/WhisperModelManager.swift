@@ -31,9 +31,13 @@ public final class WhisperModelManager: ObservableObject {
     /// model — the same shape of plausible-but-false result as the dead-engine
     /// week.
     ///
-    /// FULL large-v3 is `openai_whisper-large-v3-v20240930` — the same
-    /// conversion vintage as the default, differing ONLY in the decoder (32
-    /// layers vs turbo's 4). That makes it the honest A/B counterpart.
+    /// FULL large-v3 is `openai_whisper-large-v3` — verified by reading
+    /// `decoder_layers` from the model's own config: 32, against 4 for every
+    /// turbo build. CORRECTED 2026-08-19, the THIRD time this trap has been
+    /// caught here: `openai_whisper-large-v3-v20240930` also reports 4 layers,
+    /// because v20240930 IS the turbo release date. File size cannot tell them
+    /// apart — both decoders are 328 MB — which is why `VoiceFlowBench` now
+    /// reads and prints the layer count instead of trusting any name.
     ///
     /// Why it matters here specifically: OpenAI's own benchmarks put full
     /// large-v3 ahead of turbo by ~0.2 WER on clean English but ~1.1 WER on
@@ -43,7 +47,7 @@ public final class WhisperModelManager: ObservableObject {
     /// requires. Bigger and slower; measure before adopting.
     ///
     ///   defaults write com.voiceflow.dictation whisperModelVariant \
-    ///     -string "openai_whisper-large-v3-v20240930"
+    ///     -string "openai_whisper-large-v3"
     ///
     /// Settable via the override below without a rebuild.
     public static let defaultModelVariant = "openai_whisper-large-v3-v20240930_turbo"
