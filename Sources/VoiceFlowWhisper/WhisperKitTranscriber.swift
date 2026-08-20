@@ -25,6 +25,17 @@ public final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
     /// after the first run. Off in the app; set only by the benchmark.
     public var retainCaptureFile = false
 
+    /// When set, every capture is copied here before decoding, and the capture
+    /// file is retained. This is how a real dictation session becomes a
+    /// benchmark corpus: the same audio can then be decoded again offline under
+    /// a different model or with biasing on, which is the only way to compare
+    /// them without the owner re-reading a script (and re-reading is itself a
+    /// large source of variance — larger than the effect being measured).
+    ///
+    /// OFF unless `benchmarkRetainCaptures` is set. Audio never leaves the Mac
+    /// either way; this only decides whether it survives past the dictation.
+    public var captureArchiveDirectory: URL?
+
     public init() {}
     private var suppressTokens: [Int] = []
 
@@ -117,6 +128,18 @@ public final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         return Array(tokens.prefix(maxTokens))
     }
 
+    /// Copy the capture into the benchmark corpus, named so filename order is
+    /// chronological order — the bench pairs hypothesis line N with reference
+    /// line N, so a stable order is not cosmetic.
+    private func archiveCaptureIfNeeded(_ url: URL) {
+        guard let directory = captureArchiveDirectory else { return }
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let stamp = String(format: "%015.0f", Date().timeIntervalSince1970 * 1000)
+        let destination = directory
+            .appendingPathComponent("capture-\(stamp).\(url.pathExtension.isEmpty ? "wav" : url.pathExtension)")
+        try? FileManager.default.copyItem(at: url, to: destination)
+    }
+
     public func requestPermission() async -> Bool { true }   // mic handled by the recorder
 
     public func transcribe(_ audio: AudioCapture, languageCode: String) async throws -> VoiceFlowCore.TranscriptionResult {
@@ -130,6 +153,7 @@ public final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
             throw VoiceFlowError.audioEngineFailure("Whisper model not ready.")
         }
         guard let url = audio.fileURL else { throw VoiceFlowError.emptyTranscript }
+        archiveCaptureIfNeeded(url)
 
         // Load once (resampled to 16kHz mono by WhisperKit) and measure energy in
         // 100ms chunks. Whisper hallucinates full sentences on silence, so a

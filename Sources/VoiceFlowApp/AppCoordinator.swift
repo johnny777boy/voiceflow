@@ -124,6 +124,17 @@ final class AppCoordinator: ObservableObject {
         // covers every dictation before that, and any Whisper runtime failure).
         // No relaunch needed in either direction.
         let whisper = WhisperKitTranscriber()
+        // Benchmark mode: keep every capture so a normal day of dictation
+        // becomes a corpus that can be re-decoded offline under another model or
+        // with biasing on. Without it, a model A/B requires re-reading a script,
+        // and the reading varies more than the models do.
+        //   defaults write com.voiceflow.dictation benchmarkRetainCaptures -bool YES
+        if UserDefaults.standard.bool(forKey: "benchmarkRetainCaptures") {
+            let corpus = AppPaths.baseDirectory().appendingPathComponent("Benchmark", isDirectory: true)
+            whisper.retainCaptureFile = true
+            whisper.captureArchiveDirectory = corpus
+            Log.transcription.notice("BENCHMARK MODE: captures retained in \(corpus.path, privacy: .public)")
+        }
         // Second opinion for Whisper's silence-hallucinations: Apple's engine
         // emits nothing on silent clips, so it can veto phantom "Thank you."s.
         // ONLY the modern engine qualifies — the legacy streaming engine's

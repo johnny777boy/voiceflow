@@ -1,0 +1,50 @@
+We need to dig a new well behind the garage before the inspection on Monday.
+The framing is okay but the beam over the island is actually load bearing.
+Please send the change order to the client before Friday afternoon.
+I will not send the invoice until you confirm the deposit amount.
+The kitchen island is fifty seven by thirty five inches.
+Ask Codex to verify the branch before we merge anything to main.
+Push the Payload CMS changes and redeploy the staging site tonight.
+The GitHub actions run failed on the type check step again.
+Claude Code should handle the migration but review the diff carefully.
+We are using Next.js on the front end and PostgreSQL for the database.
+The permit came back approved so we can start demo next week.
+Tell the tile guy the shower niche moved four inches to the left.
+The client wants quartz counters instead of granite in the master bath.
+I told him the electrician cannot rough in until the plumber is done.
+Schedule the drywall crew for Tuesday morning if the inspection passes.
+The cabinet delivery slipped two weeks which pushes the whole schedule.
+Send me the updated estimate with the labor and materials broken out.
+The subfloor was rotted under the toilet so we replaced the whole section.
+We poured the slab on Thursday and it needs seven days to cure.
+The window order was wrong so they are remaking the two casements.
+Call the inspector before the meeting and ask about the setback variance.
+The homeowner approved the vanity but not the mirror or the sconces.
+Make sure the HVAC return is not blocked by the new soffit.
+I need three more sheets of half inch drywall and a box of screws.
+The tile layout should start from the center line of the tub.
+We are twelve hundred dollars over budget on the plumbing fixtures.
+The engineer stamped the drawings so the permit office will accept them.
+Do not order the flooring until the moisture reading comes back normal.
+The paint color is Swiss Coffee on the walls and white on the trim.
+Let the client know the appliance package arrives on the fifteenth.
+Ask VS Code to reformat the TypeScript file before you commit it.
+The JavaScript bundle got too large so we split the vendor chunk.
+I reviewed the pull request and left comments on the migration script.
+The staging database needs a backup before we run the schema change.
+Run the test suite twice because the flaky test only fails sometimes.
+The API returns a four oh three when the token has expired.
+We should cache the response for five minutes to reduce the load.
+The deployment failed because the environment variable was missing.
+Check the logs on the production server and tell me what you find.
+The build takes eleven minutes which is too slow for every commit.
+My wife wants the pantry moved to the other side of the refrigerator.
+The contractor said the retaining wall needs a drainage pipe behind it.
+We are pulling a separate permit for the electrical panel upgrade.
+The city requires a soil report before they will approve the addition.
+I met the architect on site and we adjusted the roof line slightly.
+The bid came in at ninety four thousand which is higher than expected.
+Send the lien release to the title company before the closing date.
+The insurance adjuster is coming Wednesday to look at the water damage.
+We finished the deck today and the crew went home early for once.
+Remind me to call the supplier about the backordered light fixtures.
