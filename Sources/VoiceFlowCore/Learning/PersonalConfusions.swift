@@ -138,7 +138,7 @@ public struct PersonalConfusions: Sendable, Equatable {
         return out.reversed()
     }
 
-    static func words(_ text: String) -> [String] {
+    public static func words(_ text: String) -> [String] {
         text.lowercased().split { !($0.isLetter || $0.isNumber || $0 == "'") }.map(String.init)
     }
 }
