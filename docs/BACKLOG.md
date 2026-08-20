@@ -1,279 +1,31 @@
 # VoiceFlow — Backlog & Handoff (resume point)
 
-## ▶️ RESUME HERE (2026-08-19)
+## ▶️ RESUME HERE (2026-08-20 end of day — the system is COMPLETE and self-improving)
 
+**State:** main = `0ba38b4`, installed, pushed, 249 tests, 0 warnings. Branch
+`feature/accuracy-parity` merged and pushed (delete after a stable week).
 
-**2026-08-19 LATE — the parity plan is BUILT (branch `feature/accuracy-parity`,
-installed `0af7359`, 213 tests, 0 warnings). Everything that did not need his
-voice is done; the two things that do are now two commands.**
+**What the product is now:** 12.07% WER on his voice (from 19.0%), biasing ON,
+run-on chunking ON, silence trimming both ends, grammar repair firing, guard
+hardened by live failures, all four of his complaint classes addressed at root.
 
-What landed:
-- **WhisperKit 0.18.0 → 1.1.0.** Cost exactly one line (`supressTokens` typo
-  renamed). Verified by decoding real audio, not assumed.
-- **Context biasing WORKS.** PR #514 fixed the prefill-EOT bug. Proven live:
-  "the payload CMS" → "the Payload CMS", "Whisperflow parody" → "Whisper Flow
-  Parity". Still ships OFF pending WER on his voice.
-- **The prompt had to become a sentence.** A bare list of Capitalised Terms made
-  Whisper copy the LIST'S STYLE into the transcript ("Work Needs Aware Benchmark
-  on My Voice"). `promptText` now emits prose, terms last, with a plain-prose
-  closing clause. Measured before/after.
-- **`VoiceFlowBench`** decodes any audio through the PRODUCTION path (Whisper
-  moved into a `VoiceFlowWhisper` library so the harness cannot drift from the
-  app). `wer_compare.py` scores two runs paired per utterance with a bootstrap
-  CI/p-value, plus entity recall, plus number normalisation (that alone was
-  costing 6.9 WER of pure formatting noise).
-- **`Scripts/bench_session.sh`** — `start` → `prompts` → `models` / `bias`.
-  Capture retention turns one dictation session into a corpus that can be
-  re-decoded under any configuration, so nothing is ever measured by re-reading.
-- **Phonetic near-miss detection** replaces the blind AX watcher as the learning
-  signal. DETECTS ONLY — "codecs"/"codices" are real words, so substitution
-  would destroy words he meant.
+**The self-improving loop, LIVE:** typed fixes are watched (incl. Electron/chat
+apps via AXManualAccessibility — needs his 15s live test to confirm in Claude),
+re-dictations are mined into personal-confusions.json, ⌃⌃ toggles a wrong-flag
+(overlay "Got it — marked as wrong" / "Unmarked"), Friday 9AM LaunchAgent runs
+checkup_notify.sh -> notification verdict, Desktop button for on-demand.
 
-**HIS TWO COMMANDS (nothing else is blocked on anything else):**
-```
-Scripts/bench_session.sh start     # then quit + reopen VoiceFlow
-Scripts/bench_session.sh prompts   # read 50 lines, one dictation each
-Scripts/bench_session.sh models    # turbo vs full large-v3 on HIS voice
-Scripts/bench_session.sh bias      # biasing off vs on, same audio
-```
-Both models are already downloaded, so neither costs a wait.
+**Next session, in order:**
+1. Verify the Electron watcher live (dictate in Claude, type a fix, check log
+   for "Correction observed"). If blind, the fallbacks (re-say, ⌃⌃) cover it.
+2. APPLY PersonalConfusions behind Codex's guard list (substitution spans only,
+   exact whole-word, >=2-3 sightings, context overlap for common words,
+   CleanupGuard audit after, log every firing) once entries exist.
+3. LoRA fine-tune when corrected corpus reaches ~1h audio (accumulating).
+4. If Friday's card says "needs attention": deep check from audit + flags.
 
-**Gates before anything ships as default:** full large-v3 becomes default only
-if paired WER is significantly better AND he accepts the latency (measured
-+31% decode on synthetic: 0.61s → 0.80s). Biasing turns on only if entity
-recall rises without overall WER regressing.
-
-**KNOWN:** WhisperKit 1.1.0 vendors an unused TTSKit module that fails Swift 6
-strict concurrency, so a BARE `swift build` shows errors unrelated to this app.
-Use `--product VoiceFlow` / `--product VoiceFlowTests` (build_app.sh already does).
-
-
-**2026-08-19 EVENING — the full parity plan is in
-`docs/RESEARCH-WISPR-PARITY-PLAN.md` (agent-researched, cited).** Wispr = cloud
-scale + context injection + a privacy bill we refuse; our gaps are the turbo
-model, dead biasing (upstream-fixed, needs v1.1.0 — BREAKING upgrade), and
-exact-match vocab. Their #1 shipped failure is the thing CleanupGuard prevents.
-NOTE: the 136-word WER script cannot resolve the model question (one error =
-0.74 WER) — plan step d.0 upgrades measurement FIRST (retain capture audio,
-same-audio A/B, ~1,000 words, paired bootstrap, entity-WER). Do d.0 before
-trusting ANY accuracy number beyond catastrophe detection.
-
-**2026-08-19 RESEARCH — read `docs/RESEARCH-ACCURACY-FIX.md` first.** He said
-Whisper hears him 99% correctly and we do not. We run Whisper too — but the
-**turbo** build (decoder truncated 32→4 layers). OpenAI's benchmarks: full
-large-v3 is ~0.2 WER better on clean English and **~1.1 WER better on accented
-English**. He is a non-native speaker, so we picked the model whose distillation
-costs him the most, and never WER-gated it. The A/B needs no code:
-`defaults write com.voiceflow.dictation whisperModelVariant -string
-"openai_whisper-large-v3"`. (The old source comment named
-`openai_whisper-large-v3_turbo` as "full large-v3" — FALSE, every `*_turbo`
-folder is turbo; that A/B would have compared turbo with turbo. Corrected.)
-Also: the promptTokens bug that disabled biasing is upstream issue #372, FIXED
-in PR #514, shipping in WhisperKit v1.1.0 — we are pinned at 0.18.0.
-
-> **CORRECTED 2026-08-19 (third instance of this trap).**
-> `openai_whisper-large-v3-v20240930` reports `decoder_layers: 4` — it is TURBO;
-> `v20240930` is the turbo release date. The real full model is
-> **`openai_whisper-large-v3`** (`decoder_layers: 32`), verified against the
-> published config. File size cannot tell them apart (both decoders are 328 MB),
-> so `VoiceFlowBench` now reads `decoder_layers` from the model's own config and
-> prints it, and `bench_session.sh` refuses to score byte-identical outputs.
-
-
-
-**PROOF IN ONE COMMAND (2026-08-19):** `swift run VoiceFlowReplay --prove`
-runs 12 dangerous edits through the REAL guard and prints plain-English
-verdicts — 9 that must be blocked (severed clause, deleted word, invented word,
-flipped negation, changed number, reversed debt, swapped preposition,
-might→will) and 3 that must still be allowed. Against the pre-`424ef4a` guard it
-reports **2 FAILED**; against HEAD, all 12 correct. This is the answer to "how
-do we know it is working" for the SAFETY half — the accuracy half still needs
-`Scripts/wer_session.sh`.
-**Yoni says on return:** *"Continue VoiceFlow — read the RESUME HERE section."*
-
-**State:** branch `feature/latency-instrumentation` (folder `VoiceFlow-accuracy`),
-head `8c83bd2`, 207 tests, 0 warnings, installed and running. `main` (folder
-`VoiceFlow Main`) is 8 days stale and still has the DEAD Whisper engine — do not
-offer it as a rollback. Rollback = `Scripts/rollback_app.sh`.
-
-**His job, 3 minutes, the only thing that settles the accuracy argument:**
-```
-cd ~/Documents/projects/VoiceFlow/VoiceFlow-accuracy
-Scripts/wer_session.sh prompts     # read the 10 lines aloud, one dictation each
-Scripts/wer_session.sh score       # get a real number
-```
-Whisper large-v3 benchmarks ~7-8% WER; Apple's engine ~14%. If he lands near
-7-8%, transcription is fine and every remaining complaint is cleanup/formatting.
-
-### What tonight actually established (all measured, not reasoned)
-
-1. **Whisper was silently dead for 8+ days.** Toggle on, model on disk, every
-   dictation served by the weaker Apple engine, no error anywhere. Two causes:
-   tokenizer resolving into TCC-protected ~/Documents, and promptTokens making
-   WhisperKit 0.18 emit zero characters. Biasing disabled behind
-   `whisperPromptBiasingEnabled`; ROOT CAUSE STILL OPEN.
-2. **His accuracy complaint was never transcription.** Whisper hears him
-   correctly. The failures were all in cleanup.
-3. **The model was REFUSING his dictations.** Handed a bare transcript, Apple's
-   model reads second-person speech as a message addressed to it: "I'm sorry, but
-   I cannot help you with that", 3/3 runs. Another dictation made it write a
-   whole change-order letter. Fixed by delimiting the transcript with the framing
-   the whole category converged on (Voicebox/Handy/VoiceInk/Whispering).
-   MEASURED before/after on his Mac — see commit `9d4fc5b`.
-4. **His guard is genuinely ahead of the market.** No shipped competitor verifies
-   the AI didn't change your words; Wispr shipped that failure publicly (700+
-   complaints, "changed words users hadn't asked it to touch").
-5. **Keep the guard strict at the WORD level.** "Cultural Ghosting" (CHI EA '26):
-   semantic-similarity guards pass the edits that erase a non-native speaker's
-   voice — 10.26% identity-erasure at 0.748 semantic similarity.
-
-### OPEN — highest value first
-
-### 2026-08-19 — "how do we know for a fact?" — three things now measured
-
-He asked the right question: unit tests cannot answer it, because the same
-person wrote the tests and the code. So `swift run VoiceFlowReplay` now drives
-the PRODUCTION cleanup path over dictations he actually spoke (the provider had
-to move from the app target into Core first — nothing but the app could run it).
-Cross-validated against the app's own live audit; both agree.
-
-1. **The guard is NOT the problem.** 0 rejections, live (6/6 accepted) and in
-   replay (8/8, 5/5). I predicted the opposite. Two independent paths agree.
-2. **The model is a light punctuation pass.** Capitalises, adds a comma or final
-   period, drops "uh" — and leaves 77-word run-ons. THE PROMPT IS WHY: at
-   `standard` it says "do NOT merge sentences" and "keep their sentence
-   structure", and never asks for sentence breaks.
-3. **`cleanupStrength` is inert.** standard vs aggressive over five real
-   run-ons: byte-identical output, 45→51 sentences, 86→77 longest, both times.
-
-**Refuted, do not re-litigate:** the guard is not eating the polish; the model
-does not degrade on long input (splitting a 76-word run-on cleaned no better and
-produced a wrong break, "we need to actually like. Go to the backlog").
-
-**The prompt was NOT the lever — measured, three variants, 25 real dictations:**
-
-| prompt | sentences | longest sentence |
-|---|---|---|
-| original (never asks for segmentation) | 106 → 118 | 86 → 77 |
-| long explicit "break run-ons, never sever a clause" | 106 → 112 | 86 → **86 (worse)** |
-| short "break it into sentences, move no word" | 106 → 118 | 86 → 77 (identical) |
-
-More instruction made the small model do LESS. The short version was a no-op.
-Both were reverted rather than shipped as churn. **Do not re-try prompt wording
-for run-ons without new evidence** — the on-device model will not segment his
-speech however it is asked. If run-ons are to be fixed, the next candidate is
-DETERMINISTIC segmentation in `RuleBasedCleanup` (now much safer to attempt,
-because `severedClause` catches the dangerous breaks), and it needs its own
-brainstorm before any code.
-
-**Landed instead (`424ef4a`): the guard's punctuation blind spot is closed.**
-It checked words and only words, so a split — which changes no words at all —
-was invisible. Probed before touching anything, and ACCEPTED all three of:
-"call me before the meeting we can decide then" → "Call me. Before the
-meeting…"; "I will not send it until you confirm" → "I will not send it.
-Until…"; "we need to actually like go to the backlog" → "…actually like. Go
-to…". The first two change what he said. Verified over 25 real dictations to
-fire ZERO times — a seatbelt for future segmentation work, not a new
-restriction on today's output.
-
-**Also seen in the replay, worth a decision:** the guard refuses the model's
-attempt to fix "bridge" → "branch" (a real Whisper mis-hearing) because that is
-a dropped word, and refuses it removing his profanity. Both are the strict
-policy working as designed; whether mis-transcription repair should be allowed
-is Yoni's call, not a bug.
-
-1. **THE AUDIT IS LIVE — use it.** Dictate normally for a few hours on the
-   installed build, then:
-   ```
-   Scripts/audit_cleanup.py            # summary
-   Scripts/audit_cleanup.py --rejected # only what the guard threw away
-   ```
-   It shows what the AI PROPOSED, whether the guard kept it, and WHY it refused.
-   Until this ran there was no way to answer "it's not accurate" — see below.
-2. **Codex verification + merge.** 24 commits unmerged. Until this lands, `main`
-   stays broken and rollback is compromised. Round 1 PASSED capture ownership,
-   round 2 FAILED on pronoun reordering (fixed, `a8cbd06`). Needs a re-run at
-   `bea6ce1`. The brief is REFRESHED and ready to paste:
-   `docs/CODEX-BRIEF-RECOVERY.md` (round 3 — new guard rule, audit ordering,
-   and an instruction to attack the guard adversarially).
-3. **WhisperKit promptTokens root cause** — Phase 1's headline feature is dormant.
-4. **The WER number** — never measured, needs his voice.
-5. **Latency**: measured bill is ~0.65s decode + ~1.2s cleanup. Two-phase delivery
-   is built and OFF; live-testing it is the cheapest felt-latency win.
-6. **Learning dictionary**: 0 suggestions in 224 dictations — design mismatch.
-
-### Do NOT do (learned the hard way tonight)
-- Do not add a discourse-marker word LIST (like/well/okay/right/actually). Audited
-  14/14 meaning losses. Position-gated rules only.
-- Do not relax the guard to semantic similarity (see #5 above).
-- Do not add "er" or "mm" to fillers ("the ER doctor", "50 mm trim").
-- Do not touch the audio-capture path without Yoni present (CLAUDE.md rule 6).
-
-### 2026-08-19 — what his 28 dictations actually say (measured, not argued)
-
-He said "it still not accurate". The history database answers most of it:
-
-- **The engine is healthy.** Whisper served 27 of 28, zero errors, and the raw
-  transcripts read accurately. The one Apple-engine dictation is the worst text
-  in the set — evidence for the engine, not against it.
-- **Cleanup is nearly a no-op.** 21 of 28 delivered text BYTE-IDENTICAL to the
-  raw transcript. Where it fired it capitalised a first letter, applied
-  vocabulary ("codex"→"Codex"), and once made a real repair ("Why it can be" →
-  "Why can it be").
-- **What his text actually reads like:** 6.4% of delivered words are discourse
-  markers (like×28, so×20, actually×9, "I mean"×8), longest sentence 73 words,
-  5 sentences over 40 words. He edited after insert only 2/28 (7%).
-- **So the complaint is presentation, not transcription** — which the 2026-08-18
-  session suspected and could not prove. WER is still the missing number.
-
-**The blind spot, now closed (`bea6ce1`).** "cleanText == rawText" was
-indistinguishable between "the model had nothing to fix" and "the model fixed it
-and the guard reverted every word". History now records `cleanupProposed`,
-`cleanupDecision` and `cleanupRejectReason`, and `Scripts/audit_cleanup.py`
-reports them (engine split, decision breakdown, ranked refusal reasons, and how
-the delivered text reads). `CleanupGuard.rejection()` is the single source of
-truth — `preservesMeaning` is defined as "no reason" — so the audit can never
-disagree with the verdict the guard actually took.
-
-**Two Settings lies found while looking:** "Use AI cleanup (requires API key)"
-reads OFF but is ignored entirely on macOS 26 (on-device cleanup always runs);
-"Redact private transcripts" is wired to NOTHING. The second is spawned as its
-own task and matters more now that a third copy of each dictation is stored.
-
-### FIXED 2026-08-19 — `sharesStem`: a prefix is not a stem (`08b14c5`)
-
-The hole, under BOTH policies: any word of ≤4 chars that prefixed a longer word
-forgave DELETING or INVENTING that longer word. "we need to dig a new well" →
-"we need to dig a new" was ACCEPTED. The partners were the words in every
-sentence he speaks — and several of them prefix his own vocabulary:
-we/well, we/went, it/item, in/into, **at/attic, be/beam, do/door**, us/used,
-the/there, an/and.
-
-Now a short stem must GROW BY AN INFLECTION (`s/es/ed/ing/er/est/ly`, plus
-`d/r/st` on an "e" stem, plus final-consonant doubling so stop→stopped), and a
-1-2 letter stem is never a stem — verb forms that short are irregular, and
-`sameIrregularVerb` already covers them.
-
-Two EXISTING tests were the safety net for what the strictness cost:
-"do not touch it" → "Don't touch it." had been passing only because "do"
-prefixed the contraction head "don". That now has its own precise rule — an
-"n't" head is forgiven only when its base word was actually spoken — and
-stop→stopped needed the doubling case. Neither would have surfaced without
-running the suite.
-
-Residual, measured against `/usr/share/dict/words`: a thin "-er" tail
-(corn/corner, off/offer, cent/center) survives. It needs BOTH words in the same
-dictation, unlike the old hole which fired on "we". Left alone deliberately —
-tightening further rejects real repairs (own→owner, low→lower).
-
-Expected felt effect: the guard now REJECTS a few edits it used to allow, so
-slightly more output arrives rule-based/verbatim. That is the correct direction
-(verbatim fidelity outranks polish), but it is a behaviour change worth watching
-for in daily use.
-
-
-Last updated: 2026-08-10. Read CLAUDE.md first (workflow ritual + product
-principles), then this, then docs/ROADMAP.md (phased plan to sellable).
+**Dead ends (measured, do not reopen):** full large-v3, Parakeet, fusion (oracle
+2/13), decoder thresholds, prompt-segmentation, prosody splits, normalization.
 
 ## ✅ MERGED 2026-08-10 — mic idle-release (merge `ac5c0dc`)
 
