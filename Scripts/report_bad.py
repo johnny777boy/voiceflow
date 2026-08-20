@@ -73,13 +73,26 @@ def show(r, meant):
         print(f"  {GRN}The engine heard you correctly.{OFF}")
 
     app_added, app_removed = diff(r["rawText"], r["cleanText"])
-    if app_added or app_removed:
+    # A raw->clean difference is NORMAL: filler removal, vocabulary substitution
+    # and every accepted grammar repair all change words legitimately. Only a
+    # difference the guard REFUSED is a breach. Calling ordinary cleanup a defect
+    # would fill the regression corpus with false verdicts as ground truth.
+    guard_breach = (app_added or app_removed) and r.get("cleanupDecision") == "rejected"
+    if guard_breach:
         print(f"\n  {RED}THE APP CHANGED YOUR WORDS AFTER HEARING THEM.{OFF}")
         if app_removed: print(f"    removed: {', '.join(app_removed)}")
         if app_added:   print(f"    added  : {', '.join(app_added)}")
         print(f"    {DIM}This should be impossible — the guard exists to stop exactly this.")
         print(f"    It is a defect. This report is the test case for it.{OFF}")
         verdicts.append("guard-leak")
+    elif app_added or app_removed:
+        print(f"\n  {YEL}Cleanup changed some words — and the guard allowed it.{OFF}")
+        if app_removed: print(f"    removed: {', '.join(app_removed)}")
+        if app_added:   print(f"    added  : {', '.join(app_added)}")
+        print(f"    {DIM}Normal: fillers, your vocabulary list, or an accepted grammar")
+        print(f"    fix. If any of these were WRONG, that is the guard being too")
+        print(f"    permissive — worth a look, but not a breach.{OFF}")
+        verdicts.append("cleanup-changed")
     elif r.get("cleanupDecision") == "rejected":
         print(f"\n  {YEL}The AI offered a fix and the guard refused it.{OFF}")
         print(f"    {DIM}You kept your own words — safe, but you also lost the repair.")

@@ -14,9 +14,15 @@ import VoiceFlowWhisper
 ///   swift run VoiceFlowBench --audio bench/ --model openai_whisper-large-v3-v20240930
 ///
 /// It drives `WhisperKitTranscriber` — the production decoder, with the
-/// production options, suppress tokens and silence arbiter — loaded through
+/// production options and suppress tokens — loaded through
 /// `WhisperModelManager.loadPipeline`, the production configuration. A harness
 /// that reimplemented any of that would prove nothing.
+///
+/// ONE DELIBERATE DIFFERENCE, and it is printed at every run: the silence
+/// arbiter (the Apple second-opinion engine) is NOT wired, because it lives in
+/// the app target. On a short clip the app can therefore deliver text the bench
+/// scores as empty. Model comparisons stay valid — both runs lack it equally —
+/// but an ABSOLUTE WER from here is not the app's WER.
 @main struct Bench {
     static func main() async {
         var audioArgs: [String] = []
@@ -67,6 +73,9 @@ import VoiceFlowWhisper
             exit(1)
         }
         FileHandle.standardError.write("decoding \(files.count) file(s)…\n".data(using: .utf8)!)
+        FileHandle.standardError.write(
+            "note: silence arbiter not wired here — short clips may score empty; "
+            + "comparisons stay valid, absolute WER is not the app's\n".data(using: .utf8)!)
 
         var lines: [String] = []
         var totalSeconds = 0.0

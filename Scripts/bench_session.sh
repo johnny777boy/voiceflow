@@ -12,6 +12,7 @@
 #   Scripts/bench_session.sh models    turbo vs full large-v3 on YOUR audio
 #   Scripts/bench_session.sh bias      context biasing off vs on
 #   Scripts/bench_session.sh status    how many captures are in the corpus
+#   Scripts/bench_session.sh stop      STOP retaining audio (do not forget this)
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CORPUS="$HOME/Library/Application Support/VoiceFlow/Benchmark"
@@ -32,8 +33,9 @@ case "${1:-help}" in
     echo "  2. Scripts/bench_session.sh prompts   ← read each line as ONE dictation"
     echo "  3. Scripts/bench_session.sh models    ← get the answer"
     echo
-    echo "Audio stays on this Mac. Turn it off again with:"
-    echo "  defaults write com.voiceflow.dictation benchmarkRetainCaptures -bool NO"
+    echo "Audio stays on this Mac — but until you stop it, EVERY dictation is"
+    echo "kept on disk, including your real work. When you are done:"
+    echo "  Scripts/bench_session.sh stop"
     ;;
   prompts)
     echo "Read each line aloud as ONE dictation, in order, at your normal pace."
@@ -43,6 +45,13 @@ case "${1:-help}" in
     nl -ba "$REF"
     echo
     echo "Then: Scripts/bench_session.sh models"
+    ;;
+  stop)
+    defaults write com.voiceflow.dictation benchmarkRetainCaptures -bool NO
+    COUNT="$(ls "$CORPUS" 2>/dev/null | wc -l | tr -d ' ')"
+    echo "Benchmark mode OFF. Quit and reopen VoiceFlow to stop retaining audio."
+    echo "$COUNT recordings are still in $CORPUS"
+    echo "Delete them when you are done:  rm -rf \"$CORPUS\""
     ;;
   status)
     COUNT="$(ls "$CORPUS" 2>/dev/null | wc -l | tr -d ' ')"
@@ -59,6 +68,8 @@ case "${1:-help}" in
     echo
     python3 "$ROOT/Scripts/wer_compare.py" "$REF" "$OUT/hyp-turbo.txt" "$OUT/hyp-large.txt" \
       --labels "turbo (current)","large-v3 (full)" --entities "$ENTITIES"
+    echo
+    echo "Done measuring? Stop retaining audio:  Scripts/bench_session.sh stop"
     ;;
   bias)
     TERMS=()
