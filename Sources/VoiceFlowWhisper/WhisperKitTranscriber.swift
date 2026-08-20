@@ -162,7 +162,27 @@ public final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         // (0.02 RMS): a quiet accented speaker must never be gated. Both RMS and
         // peak must agree before we discard. Energies are logged on every clip so
         // the thresholds can be tuned from real data.
-        let samples = try AudioProcessor.loadAudioAsFloatArray(fromPath: url.path)
+        let loaded = try AudioProcessor.loadAudioAsFloatArray(fromPath: url.path)
+        // Cut the dead air before he starts speaking. MEASURED on his own
+        // recordings 2026-08-19: every clip carried 1.6-2.7s of it, and on the
+        // first A/B sentence that gap cost five words AND invented a "Thank you"
+        // he never said — "Codex, verify branch before merging to domain. Thank
+        // you." became "Ask Codex to verify the branch before we merge it to
+        // domain." Eight errors to one.
+        //
+        // This only ever removes audio from the FRONT and always keeps a lead-in,
+        // so no spoken sound can be lost; the energy gate below still sees the
+        // whole clip's loudest moment either way. Kill switch, because this is
+        // the audio path:
+        //   defaults write com.voiceflow.dictation trimLeadingSilence -bool NO
+        let trimLeading = UserDefaults.standard.object(forKey: "trimLeadingSilence") as? Bool ?? true
+        let samples = trimLeading
+            ? LeadingSilence.trimmed(loaded, sampleRate: 16_000)
+            : loaded
+        if samples.count != loaded.count {
+            let removed = Double(loaded.count - samples.count) / 16_000
+            Log.transcription.notice("Trimmed \(removed, privacy: .public)s of leading silence")
+        }
         let chunkSize = 1600   // 100ms @ 16kHz
         var maxChunkRMS: Float = 0
         var index = 0

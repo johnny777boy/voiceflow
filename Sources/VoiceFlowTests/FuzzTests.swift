@@ -184,3 +184,63 @@ func runDoubtTests(_ s: TestSuite) {
         s.expect(TranscriptDoubt.assess(text: text, confidence: 0.95, secondOpinion: text).isEmpty)
     }
 }
+
+/// Trimming the dead air before he starts speaking (2026-08-19).
+func runLeadingSilenceTests(_ s: TestSuite) {
+    let rate = 16_000.0
+    func silence(_ seconds: Double, level: Float = 0.0008) -> [Float] {
+        (0..<Int(rate * seconds)).map { i in level * (i % 7 == 0 ? 1 : -1) }
+    }
+    func speech(_ seconds: Double, level: Float = 0.18) -> [Float] {
+        (0..<Int(rate * seconds)).map { i in
+            level * Float(sin(Double(i) * 0.07)) * (i % 1000 < 700 ? 1 : 0.3)
+        }
+    }
+
+    s.test("silence: the dead air in front of his speech is removed") { s in
+        // His real recordings carried 1.6-2.7s of it, and it cost five words and
+        // invented a "Thank you" on the first A/B sentence.
+        let clip = silence(2.5) + speech(3)
+        let out = LeadingSilence.trimmed(clip, sampleRate: rate)
+        let removed = Double(clip.count - out.count) / rate
+        s.expect(removed > 2.0 && removed < 2.4,
+                 "removed \(removed)s — should be the silence minus the 0.2s lead-in")
+    }
+
+    s.test("silence: a lead-in is always kept so a soft first word survives") { s in
+        let clip = silence(2.0) + speech(2)
+        let out = LeadingSilence.trimmed(clip, sampleRate: rate)
+        let kept = Double(out.count) / rate - 2.0
+        s.expect(kept >= 0.15, "kept only \(kept)s before speech — a quiet 'Ask' would be clipped")
+    }
+
+    s.test("silence: quiet speech is not mistaken for silence") { s in
+        // He records at a fifth of typical level. A fixed threshold tuned on
+        // loud audio would eat his words outright.
+        let clip = silence(1.5, level: 0.0005) + speech(2, level: 0.04)
+        let out = LeadingSilence.trimmed(clip, sampleRate: rate)
+        s.expect(Double(out.count) / rate > 2.0, "quiet speech was cut off")
+    }
+
+    s.test("silence: nothing is removed when there is nothing to remove") { s in
+        let straightIn = speech(3)
+        s.expectEqual(LeadingSilence.trimmed(straightIn, sampleRate: rate).count, straightIn.count)
+        // An all-silence clip is returned WHOLE — judging a clip empty belongs
+        // to the phantom filter, which has an arbiter behind it.
+        let quiet = silence(3)
+        s.expectEqual(LeadingSilence.trimmed(quiet, sampleRate: rate).count, quiet.count)
+        // And a tiny gap is not worth cutting.
+        let short = silence(0.25) + speech(2)
+        s.expectEqual(LeadingSilence.trimmed(short, sampleRate: rate).count, short.count)
+    }
+
+    s.test("silence: audio is never removed from the middle or the end") { s in
+        // A pause mid-sentence is speech, not dead air, and the end is where a
+        // trailing word lives.
+        let clip = silence(1.5) + speech(1) + silence(1.2) + speech(1.5)
+        let out = LeadingSilence.trimmed(clip, sampleRate: rate)
+        let expected = clip.count - (Int(rate * 1.5) - Int(rate * LeadingSilence.leadInSeconds))
+        s.expectEqual(out.count, expected)
+        s.expectEqual(Array(out.suffix(100)), Array(clip.suffix(100)))
+    }
+}
