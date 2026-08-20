@@ -37,6 +37,7 @@ final class AppCoordinator: ObservableObject {
     private let hotkeys: GlobalHotkeyManager
     private var flagKeyGlobalMonitor: Any?
     private var flagKeyLocalMonitor: Any?
+    private let flagKeyTaps = DoubleTapTracker()
     private let settingsStore: SettingsStore
     private let history: HistoryStoring
     private let secureStore: SecureStoring
@@ -308,17 +309,25 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
-    /// The "that was wrong" key: ⌃⌥⌘X, one tap after a bad dictation. Flags the
-    /// evidence for the deep check — no repeating, no editing, no reporting.
-    /// A separate monitor from the dictation hotkey so neither can break the
-    /// other; keyDown only, never consumed.
+    /// The "that was wrong" gesture: TAP CONTROL TWICE (⌃⌃), quickly.
+    ///
+    /// His dictation key is a single held Option, so the error report has to be
+    /// just as light — a chord like ⌃⌥⌘X was rejected as too much. Two taps of
+    /// the bottom-corner key, one finger, done. A quiet sound acknowledges.
+    ///
+    /// Strictly two PURE taps: control pressed alone (no other modifiers), no
+    /// real key typed between the taps, both within 600ms. That makes ⌃C ⌃V
+    /// runs and ⌃-clicks invisible to it — those always type or click between
+    /// presses. Separate monitors from the dictation hotkey so neither can
+    /// break the other; nothing is consumed, nothing is typed.
     private func registerFlagKey() {
-        let mask: NSEvent.EventTypeMask = [.keyDown]
-        let required: NSEvent.ModifierFlags = [.control, .option, .command]
         let handle: @Sendable (NSEvent) -> Void = { [weak self] event in
-            guard event.keyCode == 7,   // kVK_ANSI_X
-                  event.modifierFlags.intersection([.control, .option, .command, .shift]) == required
-            else { return }
+            guard let self else { return }
+            if event.type == .keyDown { self.flagKeyTaps.somethingTyped(); return }
+            guard event.type == .flagsChanged else { return }
+            let mods = event.modifierFlags.intersection([.control, .option, .command, .shift, .function])
+            guard self.flagKeyTaps.controlEvent(isPureControl: mods == .control,
+                                                controlHeld: mods.contains(.control)) else { return }
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 if await self.controller.flagLastDictation() != nil {
@@ -326,6 +335,7 @@ final class AppCoordinator: ObservableObject {
                 }
             }
         }
+        let mask: NSEvent.EventTypeMask = [.flagsChanged, .keyDown]
         flagKeyGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: handle)
         flagKeyLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { event in
             handle(event); return event
@@ -569,5 +579,35 @@ final class AppCoordinator: ObservableObject {
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(record.cleanText, forType: .string)
+    }
+}
+
+/// Detects a quick double-tap of Control from event-monitor callbacks, which
+/// arrive off the main actor. Lock-guarded so the Sendable closure can use it.
+private final class DoubleTapTracker: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lastTap: Date?
+    private var wasDown = false
+    private var typedSinceTap = false
+
+    func somethingTyped() {
+        lock.lock(); defer { lock.unlock() }
+        typedSinceTap = true
+    }
+
+    /// Returns true when this event completes a pure double-tap.
+    func controlEvent(isPureControl: Bool, controlHeld: Bool) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        let pressed = isPureControl && !wasDown
+        wasDown = controlHeld
+        guard pressed else { return false }
+        let now = Date()
+        if let last = lastTap, now.timeIntervalSince(last) < 0.6, !typedSinceTap {
+            lastTap = nil
+            return true
+        }
+        lastTap = now
+        typedSinceTap = false
+        return false
     }
 }
