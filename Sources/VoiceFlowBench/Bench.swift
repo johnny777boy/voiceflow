@@ -25,22 +25,6 @@ import VoiceFlowWhisper
 /// but an ABSOLUTE WER from here is not the app's WER.
 @main struct Bench {
     static func main() async {
-        // Parakeet shadow benchmark — a different ENGINE, not a bigger Whisper.
-        if CommandLine.arguments.contains("--parakeet") {
-            guard #available(macOS 14.0, *) else { print("needs macOS 14"); exit(2) }
-            var files: [URL] = []
-            if let i = CommandLine.arguments.firstIndex(of: "--audio") {
-                var k = i + 1
-                while k < CommandLine.arguments.count, !CommandLine.arguments[k].hasPrefix("-") {
-                    files += expand([CommandLine.arguments[k]]); k += 1
-                }
-            }
-            let out = CommandLine.arguments.firstIndex(of: "--out").map { CommandLine.arguments[$0 + 1] }
-            do { try await runParakeet(files: files.sorted { $0.lastPathComponent < $1.lastPathComponent }, out: out) }
-            catch { FileHandle.standardError.write("parakeet failed: \(error)\n".data(using: .utf8)!); exit(1) }
-            exit(0)
-        }
-
         // Pause-structure probe (Codex diagnosis, 2026-08-20). Checked before
         // anything else so it does not need the --audio plumbing.
         if let idx = CommandLine.arguments.firstIndex(of: "--timings"),
