@@ -467,6 +467,11 @@ public enum CleanupGuard {
         // would let cleanup invent "I"/"a" (Codex verification finding).
         let shards = contractionShards(cleaned)
         let heads = contractionHeads(cleaned)
+        // Mirror of the deletion accounting below: only an original word that
+        // did NOT survive verbatim can have been transformed into a new one.
+        // Otherwise "he wants it and I want it" could gain a "wants" out of
+        // nowhere, excused by the "want" that is still sitting right there.
+        var availableAsStemSource = originalWords.filter { !Set(cleanedAllWords).contains($0) }
         var insertionsUsed = 0
         let budget = policy == .grammarRepair ? insertionBudget(originalWordCount: originalWords.count) : 0
         for word in allWords(cleaned) where !originalSet.contains(word) {
@@ -486,11 +491,22 @@ public enum CleanupGuard {
                let expansion = Self.irregularContractions[word],
                expansion.allSatisfy({ originalSet.contains($0) }) { continue }
             if word.allSatisfy({ $0.isNumber }) { continue }   // digit sets equal per step 3
-            if sharesStem(word, withAnyOf: originalWords) { continue }
+            if let source = availableAsStemSource.firstIndex(where: {
+                $0 != word && sharesStem(word, withAnyOf: [$0])
+            }) {
+                availableAsStemSource.remove(at: source)
+                continue
+            }
             if policy == .grammarRepair {
                 // An irregular form of a verb he actually said is the same verb —
-                // but only while the clause's tense is untouched.
-                if tenseIntact, originalWords.contains(where: { sameIrregularVerb(word, $0) }) { continue }
+                // but only while the clause's tense is untouched, and only once
+                // per original form.
+                if tenseIntact, let source = availableAsStemSource.firstIndex(where: {
+                    sameIrregularVerb(word, $0)
+                }) {
+                    availableAsStemSource.remove(at: source)
+                    continue
+                }
                 // A function word may be introduced, but only within the budget:
                 // structure is free to fix, content is never free to invent.
                 if functionWords.contains(word), insertionsUsed < budget {
@@ -511,12 +527,37 @@ public enum CleanupGuard {
         // a deletion. The invented-word check above handles the other direction;
         // both are needed or the same edit is refused coming and going.
         let cleanedHeads = contractionHeads(cleaned)
+        // A morphological sibling may excuse ONE missing word, not many. Found
+        // by fuzzing, 2026-08-19: "we need to send it, he needed it yesterday"
+        // could lose "need" entirely because "needed" was still there, and the
+        // stem check — being a bag-of-words test — saw nothing wrong. Each
+        // surviving word can stand in for at most one original, so a genuine
+        // deletion cannot hide behind a word that is already accounted for.
+        // Only a cleaned word that is NOT itself one of his original words can
+        // stand in for a missing one. "needed" surviving from his own "needed"
+        // is already accounted for; letting it also excuse a dropped "need" is
+        // how the word disappeared silently.
+        var availableAsStemMatch = cleanedWords.filter { !originalSet.contains($0) }
         for word in significantWords(original) where !cleanedSet.contains(word) {
             if TextNormalizer.fillerWords.contains(word) { continue }
             if cleanedHeads.contains(where: { Self.irregularContractions[$0]?.contains(word) == true }) { continue }
-            if sharesStem(word, withAnyOf: cleanedWords) { continue }
+            if let match = availableAsStemMatch.firstIndex(where: {
+                $0 != word && sharesStem(word, withAnyOf: [$0])
+            }) {
+                availableAsStemMatch.remove(at: match)
+                continue
+            }
             if policy == .grammarRepair {
-                if tenseIntact, cleanedWords.contains(where: { sameIrregularVerb(word, $0) }) { continue }
+                // Count-aware for the same reason as the stem check above: "I
+                // will send the invoice, I sent the deposit" must not lose
+                // "send" merely because "sent" is somewhere in the sentence.
+                // One surviving form covers one original form.
+                if tenseIntact, let match = availableAsStemMatch.firstIndex(where: {
+                    sameIrregularVerb(word, $0)
+                }) {
+                    availableAsStemMatch.remove(at: match)
+                    continue
+                }
                 if isRemovableDisfluency(word, originalWords: originalWords) { continue }
                 // Dropping a function word is a grammar fix ("interesting FOR
                 // discuss" → "interested IN discussing"); dropping a content word
