@@ -527,6 +527,10 @@ public enum CleanupGuard {
         // a deletion. The invented-word check above handles the other direction;
         // both are needed or the same edit is refused coming and going.
         let cleanedHeads = contractionHeads(cleaned)
+        // "You'll" splits into "you" + "ll". The shard is a fragment of a word,
+        // not a word — and now that content is protected by class rather than
+        // by length, a two-letter shard would otherwise read as a deleted term.
+        let originalShards = contractionShards(original)
         // A morphological sibling may excuse ONE missing word, not many. Found
         // by fuzzing, 2026-08-19: "we need to send it, he needed it yesterday"
         // could lose "need" entirely because "needed" was still there, and the
@@ -540,6 +544,13 @@ public enum CleanupGuard {
         var availableAsStemMatch = cleanedWords.filter { !originalSet.contains($0) }
         for word in significantWords(original) where !cleanedSet.contains(word) {
             if TextNormalizer.fillerWords.contains(word) { continue }
+            if originalShards.contains(word) { continue }
+            // Absorbed into a contraction the cleaned text uses: "do" lives
+            // inside "don't", "is" inside "isn't", "could" inside "couldn't".
+            // Now that content words are protected at any length, these have to
+            // be recognised explicitly — "do" is two letters and used to slip
+            // through on size alone.
+            if cleanedHeads.contains(word) || cleanedHeads.contains(word + "n") { continue }
             if cleanedHeads.contains(where: { Self.irregularContractions[$0]?.contains(word) == true }) { continue }
             if let match = availableAsStemMatch.firstIndex(where: {
                 $0 != word && sharesStem(word, withAnyOf: [$0])
@@ -721,11 +732,36 @@ public enum CleanupGuard {
     }
 
     /// Content words (>3 chars), lowercased — ignores articles/fillers cleanup may drop.
-    static func significantWords(_ text: String) -> [String] {
+    /// The words whose disappearance would be a loss of meaning.
+    ///
+    /// This used to be "longer than three letters", a crude stand-in for
+    /// "content word" — and it cost him a live dictation on 2026-08-19: the
+    /// engine heard "ask codex to verified branch … we merge to domain" and
+    /// cleanup delivered "Codex, verify branch before merging to domain",
+    /// dropping "ask" and "we". The guard accepted it, because "ask" is three
+    /// letters.
+    ///
+    /// Three letters covers most of the verbs in his trade — ask, pay, cut,
+    /// fix, add, dig, bid, run, tax, job — so the rule was excusing exactly the
+    /// words that carry the instruction. Length was never the right test:
+    /// being a FUNCTION word is. Articles, prepositions and pronouns may come
+    /// and go (that is grammar); everything else is content, at any length.
+    public static func significantWords(_ text: String) -> [String] {
         text.lowercased()
             .split { !($0.isLetter || $0.isNumber) }
             .map(String.init)
-            .filter { $0.count > 3 }
+            .filter {
+                $0.count >= 2
+                    && !functionWords.contains($0)
+                    && !TextNormalizer.fillerWords.contains($0)
+                    // Negation is guaranteed exactly, by count, in step 2 — and
+                    // it hides inside contractions ("not" within "don't"), so
+                    // checking it here as well only produces false refusals.
+                    && !negationWords.contains($0)
+                    // Auxiliaries carry no content of their own; they are
+                    // structure, and they are absorbed by contractions too.
+                    && !["do", "does", "did", "done", "doing"].contains($0)
+            }
     }
 
     /// Keep the repairs that are safe instead of discarding all of them.

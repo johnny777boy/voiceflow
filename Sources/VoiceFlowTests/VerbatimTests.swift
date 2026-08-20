@@ -360,6 +360,36 @@ func runVerbatimTests(_ s: TestSuite) {
             original: "the crew finished the deck", cleaned: "the mason's crew finished the deck", policy: p))
     }
 
+    s.test("guard: a short CONTENT word may not be deleted (his live failure)") { s in
+        // LIVE, 2026-08-19, from his own dictation. The engine heard
+        // "ask codex to verified branch, Before, we merge to domain. Thank. You"
+        // and cleanup delivered "Codex, verify branch before merging to domain."
+        // — dropping "ask" and "we". The guard ACCEPTED it, because
+        // `significantWords` only protected words longer than three letters.
+        //
+        // Three letters covers most of the verbs in his trade: ask, pay, cut,
+        // fix, add, dig, bid, run, tax, job. Every one of them could vanish.
+        let p = CleanupGuard.Policy.grammarRepair
+        s.expectFalse(CleanupGuard.preservesMeaning(
+            original: "ask codex to verified branch, Before, we merge to domain. Thank. You",
+            cleaned: "Codex, verify branch before merging to domain. Thank you.", policy: p),
+            "the live failure: 'ask' and 'we' were deleted and it passed")
+        for (said, proposed) in [
+            ("pay him for the demo work", "him for the demo work"),
+            ("cut the beam at the mark", "the beam at the mark"),
+            ("add a wall in the hallway", "a wall in the hallway"),
+            ("dig the trench before friday", "the trench before friday"),
+            ("fix the leak under the sink", "the leak under the sink"),
+        ] {
+            s.expectFalse(CleanupGuard.preservesMeaning(original: said, cleaned: proposed, policy: p),
+                          "a three-letter verb vanished: \(said) -> \(proposed)")
+        }
+        // Function words that short are still free to come and go — that is
+        // grammar, not content.
+        s.expect(CleanupGuard.preservesMeaning(
+            original: "he go to the site tomorrow", cleaned: "He goes to the site tomorrow.", policy: p))
+    }
+
     s.test("guard: it must not equate unrelated words via consonant doubling") { s in
         // Reviewer finding, 2026-08-19. The un-doubling branch forgave
         // stem + doubled-consonant + inflection, which quietly equated words
