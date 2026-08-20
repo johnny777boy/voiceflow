@@ -94,9 +94,9 @@ case "${1:-help}" in
     python3 "$ROOT/Scripts/wer_compare.py" --self-test || exit 1
     rm -f "$OUT"/hyp-*.txt      # never score a stale file from a previous run
     echo "Decoding your audio under BOTH models — same files, no re-reading."
-    swift run --package-path "$ROOT" VoiceFlowBench --audio "$CORPUS" \
+    swift run -c release --package-path "$ROOT" VoiceFlowBench --audio "$CORPUS" \
       --model "$TURBO" --out "$OUT/hyp-turbo.txt"
-    swift run --package-path "$ROOT" VoiceFlowBench --audio "$CORPUS" \
+    swift run -c release --package-path "$ROOT" VoiceFlowBench --audio "$CORPUS" \
       --model "$LARGE" --out "$OUT/hyp-large.txt"
     echo
     # If the two runs produced byte-identical text, the SAME model ran twice.
@@ -118,10 +118,22 @@ case "${1:-help}" in
     python3 "$ROOT/Scripts/wer_compare.py" --self-test || exit 1
     rm -f "$OUT"/hyp-nobias.txt "$OUT"/hyp-bias.txt
     echo "Decoding your audio with context biasing OFF, then ON — same files."
-    swift run --package-path "$ROOT" VoiceFlowBench --audio "$CORPUS" \
-      --out "$OUT/hyp-nobias.txt"
-    swift run --package-path "$ROOT" VoiceFlowBench --audio "$CORPUS" \
-      --bias "${TERMS[@]}" --out "$OUT/hyp-bias.txt" -whisperPromptBiasingEnabled YES
+    # BOTH runs use the same model and the same term list; only the biasing
+    # switch changes. Passing --bias to one run and nothing to the other would
+    # also change the echo-discard and voting paths, confounding the result.
+    MODEL="${BENCH_MODEL:-$TURBO}"
+    echo "(model: $MODEL — set BENCH_MODEL to match whatever 'models' selected)"
+    swift run -c release --package-path "$ROOT" VoiceFlowBench --audio "$CORPUS" \
+      --model "$MODEL" --bias "${TERMS[@]}" --out "$OUT/hyp-nobias.txt" \
+      -whisperPromptBiasingEnabled NO
+    swift run -c release --package-path "$ROOT" VoiceFlowBench --audio "$CORPUS" \
+      --model "$MODEL" --bias "${TERMS[@]}" --out "$OUT/hyp-bias.txt" \
+      -whisperPromptBiasingEnabled YES
+    if cmp -s "$OUT/hyp-nobias.txt" "$OUT/hyp-bias.txt"; then
+      echo "FATAL: identical output with biasing on and off — no prompt reached the"
+      echo "decoder. That is the eight-day failure shape; do not read this as 'no effect'."
+      exit 1
+    fi
     echo
     python3 "$ROOT/Scripts/wer_compare.py" "$REF" "$OUT/hyp-nobias.txt" "$OUT/hyp-bias.txt" \
       --labels "no biasing","biasing on" --entities "$ENTITIES"

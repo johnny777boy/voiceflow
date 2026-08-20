@@ -50,7 +50,7 @@ public struct CleanupPipeline: CleanupProviding {
                 // Short casual utterance: the rules already produce what the
                 // guard-constrained model would have returned, ~1s sooner.
                 Log.cleanup.notice("AI cleanup skipped (short utterance fast path)")
-                audit?.recordIfAbsent(.init(decision: "fast-path"))
+                audit?.recordIfAbsent(.init(dictationID: context.dictationID, decision: "fast-path"))
             } else {
                 do {
                     let refined = try await Self.withDeadline(seconds: context.cleanupTimeout) {
@@ -62,21 +62,21 @@ public struct CleanupPipeline: CleanupProviding {
                 } catch VoiceFlowError.cleanupProviderUnavailable {
                     // The guard's own REJECTION arrives here as a throw, and it
                     // has already written the precise reason — never overwrite it.
-                    audit?.recordIfAbsent(.init(decision: "unavailable"))
+                    audit?.recordIfAbsent(.init(dictationID: context.dictationID, decision: "unavailable"))
                     Log.cleanup.notice("AI cleanup unavailable; rule-based result")
                 } catch is CancellationError {
                     throw CancellationError()   // a cancelled dictation stays cancelled
                 } catch is CleanupTimeout {
-                    audit?.recordIfAbsent(.init(decision: "timeout"))
+                    audit?.recordIfAbsent(.init(dictationID: context.dictationID, decision: "timeout"))
                     Log.cleanup.error("AI cleanup TIMED OUT after \(context.cleanupTimeout, privacy: .public)s — delivering the rule-based result")
                 } catch {
-                    audit?.recordIfAbsent(.init(decision: "failed"))
+                    audit?.recordIfAbsent(.init(dictationID: context.dictationID, decision: "failed"))
                     Log.cleanup.error("AI cleanup failed, using rule-based result: \(String(describing: error), privacy: .public)")
                 }
             }
         } else {
             // No model was ever in play: raw mode, strength off, or LLM disabled.
-            audit?.recordIfAbsent(.init(decision: "rules-only"))
+            audit?.recordIfAbsent(.init(dictationID: context.dictationID, decision: "rules-only"))
         }
 
         return finalTidy(result, context: context)

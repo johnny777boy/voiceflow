@@ -116,15 +116,15 @@ public final class FoundationModelsCleanupProvider: CleanupProviding, @unchecked
         let reason = CleanupGuard.rejection(
             original: rawText, cleaned: text, policy: context.guardPolicy)?.description
         if merged == text {
-            audit?.record(.init(proposed: text, decision: "accepted"))
+            audit?.record(.init(dictationID: context.dictationID, proposed: text, decision: "accepted"))
             Log.cleanup.notice("AI cleanup: guard ACCEPTED the edit (\(rawText.count, privacy: .public)→\(text.count, privacy: .public) chars)")
         } else if merged == rawText {
-            audit?.record(.init(proposed: text, decision: "rejected", reason: reason))
+            audit?.record(.init(dictationID: context.dictationID, proposed: text, decision: "rejected", reason: reason))
             Log.cleanup.error("AI cleanup: guard REJECTED every sentence — delivering unrepaired text")
             Log.cleanup.debug("AI cleanup rejected — was: \(rawText, privacy: .private) / proposed: \(text, privacy: .private)")
             throw VoiceFlowError.cleanupProviderUnavailable
         } else {
-            audit?.record(.init(proposed: text, decision: "partial", reason: reason))
+            audit?.record(.init(dictationID: context.dictationID, proposed: text, decision: "partial", reason: reason))
             Log.cleanup.notice("AI cleanup: guard kept the SAFE sentences and reverted the rest (\(rawText.count, privacy: .public)→\(merged.count, privacy: .public) chars)")
         }
         return merged

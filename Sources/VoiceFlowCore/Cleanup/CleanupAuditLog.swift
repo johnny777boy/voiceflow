@@ -15,6 +15,12 @@ import Foundation
 /// than one in the slot.
 public final class CleanupAuditLog: @unchecked Sendable {
     public struct Entry: Sendable, Equatable {
+        /// Which dictation this account belongs to. Without it, an abandoned
+        /// timeout task (`withDeadline` races the model and ABANDONS the loser,
+        /// which keeps running) or two-phase delivery's second cleanup can drop
+        /// its entry into the slot while the NEXT dictation is in flight — so
+        /// N+1's history row stores N's proposed text and N's verdict.
+        public var dictationID: UUID?
         /// What the model proposed, BEFORE the guard ruled on it.
         public var proposed: String?
         /// "accepted" · "partial" · "rejected" · "unavailable" · "timeout"
@@ -23,7 +29,9 @@ public final class CleanupAuditLog: @unchecked Sendable {
         /// Why the guard refused, when it did.
         public var reason: String?
 
-        public init(proposed: String? = nil, decision: String, reason: String? = nil) {
+        public init(dictationID: UUID? = nil, proposed: String? = nil,
+                    decision: String, reason: String? = nil) {
+            self.dictationID = dictationID
             self.proposed = proposed
             self.decision = decision
             self.reason = reason
@@ -53,11 +61,14 @@ public final class CleanupAuditLog: @unchecked Sendable {
     }
 
     /// Read and clear, so one dictation's account can never be attributed to the
-    /// next one.
-    public func take() -> Entry? {
+    /// next one. An entry stamped for a DIFFERENT dictation is discarded rather
+    /// than returned — a late writer from a previous dictation must not be
+    /// mistaken for this one's account.
+    public func take(expecting id: UUID? = nil) -> Entry? {
         lock.lock(); defer { lock.unlock() }
         let taken = entry
         entry = nil
+        if let id, let taken, let stamped = taken.dictationID, stamped != id { return nil }
         return taken
     }
 }

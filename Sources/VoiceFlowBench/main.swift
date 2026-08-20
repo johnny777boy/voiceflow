@@ -101,7 +101,7 @@ import VoiceFlowWhisper
         FileHandle.standardError.write(note.data(using: .utf8)!)
 
         var lines: [String] = []
-        var totalSeconds = 0.0
+        var timings: [Double] = []
         for (i, url) in files.enumerated() {
             let started = Date()
             let capture = AudioCapture(samples: [], sampleRate: 16_000, duration: 0, fileURL: url)
@@ -117,7 +117,7 @@ import VoiceFlowWhisper
                 FileHandle.standardError.write("  \(url.lastPathComponent): FAILED \(error)\n".data(using: .utf8)!)
             }
             let elapsed = Date().timeIntervalSince(started)
-            totalSeconds += elapsed
+            timings.append(elapsed)
             lines.append(text.trimmingCharacters(in: .whitespacesAndNewlines))
             FileHandle.standardError.write(
                 String(format: "  [%d/%d] %.2fs  %@\n", i + 1, files.count, elapsed,
@@ -140,22 +140,31 @@ import VoiceFlowWhisper
         // Confirm a prompt actually reached the decoder. Biasing silently
         // failing to engage looks identical to biasing not helping — and that
         // exact confusion cost this project eight days.
-        let bias = biasTerms.isEmpty ? "none" : "\(biasTerms.count) terms"
+        let bias = biasTerms.isEmpty
+            ? "none"
+            : "\(biasTerms.count) terms, prompt \(UserDefaults.standard.bool(forKey: "whisperPromptBiasingEnabled") ? "FED" : "withheld")"
         if !biasTerms.isEmpty {
+            // The OFF arm deliberately passes --bias too, so the context (and
+            // therefore the echo-discard and voting paths) is identical and the
+            // ONLY difference is whether a prompt is fed.
             let enabled = UserDefaults.standard.bool(forKey: "whisperPromptBiasingEnabled")
-            if !enabled {
-                FileHandle.standardError.write(
-                    "FATAL: --bias was passed but whisperPromptBiasingEnabled is not set, so NO prompt was fed. Re-run with -whisperPromptBiasingEnabled YES\n"
-                        .data(using: .utf8)!)
-                exit(3)
-            }
             let prompt = TranscriptionContext(vocabularyTerms: biasTerms).promptText()
-            FileHandle.standardError.write("  bias prompt : \(prompt)\n".data(using: .utf8)!)
+            FileHandle.standardError.write(
+                "  bias prompt : \(enabled ? prompt : "(biasing OFF — control arm, context still supplied)")\n"
+                    .data(using: .utf8)!)
         }
-        FileHandle.standardError.write(
-            String(format: "model=%@  bias=%@  files=%d  decode=%.1fs total (%.2fs mean)\n",
-                   model, bias, files.count, totalSeconds,
-                   totalSeconds / Double(max(files.count, 1))).data(using: .utf8)!)
+        // Latency, honestly. The gate in the plan is p95, not mean, and the
+        // first decode pays Core ML specialization — reporting a mean that
+        // includes it overstates the cost of whichever model runs first.
+        let warm = timings.count > 1 ? Array(timings.dropFirst()) : timings
+        let sorted = warm.sorted()
+        let median = sorted[sorted.count / 2]
+        let p95 = sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.95))]
+        let summary = String(
+            format: "model=%@  bias=%@  files=%d\n"
+                + "decode  median %.2fs   p95 %.2fs   max %.2fs   (first decode %.2fs excluded as warm-up)\n",
+            model, bias, files.count, median, p95, sorted.last ?? 0, timings.first ?? 0)
+        FileHandle.standardError.write(summary.data(using: .utf8)!)
     }
 
     /// Files in stable filename order, so hypothesis line N always pairs with

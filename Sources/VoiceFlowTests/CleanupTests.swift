@@ -261,6 +261,17 @@ func runCleanupTests(_ s: TestSuite) {
         once.record(.init(decision: "accepted"))
         s.expectEqual(once.take()?.decision, "accepted")
         s.expectNil(once.take())
+        // An entry stamped for a DIFFERENT dictation is discarded, not returned:
+        // an abandoned timeout task from dictation N keeps running and can drop
+        // its entry into the slot while N+1 is in flight, which would file N's
+        // proposed text against N+1's history row.
+        let a = UUID(), b = UUID()
+        let stamped = CleanupAuditLog()
+        stamped.record(.init(dictationID: a, proposed: "from the previous one", decision: "rejected"))
+        s.expectNil(stamped.take(expecting: b), "a late entry from another dictation must not be adopted")
+        stamped.record(.init(dictationID: b, proposed: "mine", decision: "accepted"))
+        s.expectEqual(stamped.take(expecting: b)?.proposed, "mine")
+
         // And the precise inner verdict outranks the coarse outer one.
         once.record(.init(proposed: "x", decision: "rejected", reason: "dropped the word \"well\""))
         once.recordIfAbsent(.init(decision: "unavailable"))

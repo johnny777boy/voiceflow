@@ -223,6 +223,11 @@ public actor DictationController {
 
         // Cleanup for the resolved mode.
         let mode = settings.mode(forBundleIdentifier: original.bundleIdentifier)
+        // One id for THIS dictation, carried into cleanup so the audit slot can
+        // reject an entry written late by a previous one (an abandoned timeout
+        // task, or two-phase delivery's second pass, both outlive their own
+        // dictation).
+        let dictationID = UUID()
         let context = CleanupContext(
             mode: mode,
             strength: settings.cleanupStrength,
@@ -230,7 +235,8 @@ public actor DictationController {
             languageCode: settings.languageCode,
             spokenPunctuationEnabled: settings.spokenPunctuationEnabled,
             fastPathEnabled: settings.fastShortUtterances,
-            guardPolicy: settings.grammarRepairEnabled ? .grammarRepair : .verbatim
+            guardPolicy: settings.grammarRepairEnabled ? .grammarRepair : .verbatim,
+            dictationID: dictationID
         )
 
         // Two-phase delivery (OFF by default, needs live testing): put the
@@ -245,7 +251,7 @@ public actor DictationController {
             ? try await cleanup.deterministicClean(raw, context: context)
             : try await cleanup.clean(raw, context: context)
         let cleanupSeconds = max(0, time.now() - cleanupStarted)
-        let audit = cleanupAudit?.take()
+        let audit = cleanupAudit?.take(expecting: dictationID)
 
         // Re-verify destination immediately before insertion.
         let current = activeApp.captureSnapshot()

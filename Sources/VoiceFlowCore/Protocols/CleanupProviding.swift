@@ -25,6 +25,9 @@ public struct CleanupContext: Sendable, Equatable {
     /// under ANE contention — silently costing the repair, which the standing
     /// accuracy rule forbids. This is a hang-stopper, not a latency knob.
     public let cleanupTimeout: TimeInterval
+    /// Identifies the dictation this cleanup belongs to, so the audit slot can
+    /// reject an entry written late by a previous one.
+    public var dictationID: UUID?
 
     public init(
         mode: DictationMode,
@@ -34,7 +37,8 @@ public struct CleanupContext: Sendable, Equatable {
         spokenPunctuationEnabled: Bool = false,
         fastPathEnabled: Bool = false,
         guardPolicy: CleanupGuard.Policy = .verbatim,
-        cleanupTimeout: TimeInterval = 15
+        cleanupTimeout: TimeInterval = 15,
+        dictationID: UUID? = nil
     ) {
         self.mode = mode
         self.strength = strength
@@ -43,6 +47,7 @@ public struct CleanupContext: Sendable, Equatable {
         self.spokenPunctuationEnabled = spokenPunctuationEnabled
         self.fastPathEnabled = fastPathEnabled
         self.guardPolicy = guardPolicy
+        self.dictationID = dictationID
         self.cleanupTimeout = cleanupTimeout
     }
 }
