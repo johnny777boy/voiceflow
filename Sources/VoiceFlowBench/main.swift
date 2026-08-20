@@ -35,14 +35,17 @@ import VoiceFlowWhisper
             args.removeFirst()
             switch flag {
             case "--audio":
-                while let next = args.first, !next.hasPrefix("--") { audioArgs.append(next); args.removeFirst() }
+                while let next = args.first, !next.hasPrefix("-") { audioArgs.append(next); args.removeFirst() }
             case "--model": model = args.first ?? model; if !args.isEmpty { args.removeFirst() }
             case "--out": out = args.first; if !args.isEmpty { args.removeFirst() }
             case "--language": language = args.first ?? language; if !args.isEmpty { args.removeFirst() }
             case "--bias":
                 // Terms to feed the recognizer BEFORE it decodes. Only has an
                 // effect with -whisperPromptBiasingEnabled YES.
-                while let next = args.first, !next.hasPrefix("--") { biasTerms.append(next); args.removeFirst() }
+                // Stop at ANY flag, not just "--" ones: a single-dash defaults
+                // override ("-whisperPromptBiasingEnabled YES") was being eaten
+                // into the term list and fed to the decoder as vocabulary.
+                while let next = args.first, !next.hasPrefix("-") { biasTerms.append(next); args.removeFirst() }
             default: break
             }
         }
