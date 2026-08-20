@@ -307,4 +307,30 @@ func runContextBiasTests(_ suite: TestSuite) {
         s.expectEqual(transcriber.lastContext?.screenTerms, [])
         s.expect(transcriber.lastContext?.vocabularyTerms.isEmpty == false)
     }
+
+    suite.test("echo defense also covers the prompt's FRAMING, not just the terms") { s in
+        // Reviewer finding I10, and it blocks turning biasing on. The prompt is a
+        // whole sentence — "The following transcript mentions X, Y, Z. It is
+        // written in ordinary sentence case." — but the echo check only knew the
+        // terms. A model parroting the FRAMING would have had it delivered as his
+        // dictation: the invented-words failure in its purest form.
+        let terms = ["Codex", "Payload CMS", "GitHub"]
+        s.expect(TranscriptSanity.looksLikePromptEcho(
+            text: "It is written in ordinary sentence case.", promptTerms: terms),
+            "the trailer alone must be caught")
+        s.expect(TranscriptSanity.looksLikePromptEcho(
+            text: "The following transcript mentions Payload CMS", promptTerms: terms),
+            "the lead-in plus one term must be caught")
+        s.expect(TranscriptSanity.looksLikePromptEcho(
+            text: "The following transcript mentions Codex, Payload CMS, GitHub. It is written in ordinary sentence case.",
+            promptTerms: terms),
+            "the whole prompt echoed back must be caught")
+        // Real speech that happens to use his terms is NOT an echo.
+        s.expectFalse(TranscriptSanity.looksLikePromptEcho(
+            text: "Ask Codex to verify the branch before we merge it to main", promptTerms: terms),
+            "a genuine dictation containing a term must survive")
+        s.expectFalse(TranscriptSanity.looksLikePromptEcho(
+            text: "Push the Payload CMS changes to GitHub and redeploy the staging site", promptTerms: terms),
+            "a genuine dictation with two terms must survive")
+    }
 }

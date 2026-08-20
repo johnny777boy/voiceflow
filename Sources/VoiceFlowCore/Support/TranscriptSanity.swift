@@ -99,7 +99,21 @@ public enum TranscriptSanity {
     /// names never qualifies ("tell Sarah about Kubernetes" is 2 of 4).
     public static func looksLikePromptEcho(text: String, promptTerms: [String]) -> Bool {
         guard !promptTerms.isEmpty else { return false }
-        let words = normalized(text).split(separator: " ").map(String.init)
+        let normalizedText = normalized(text)
+        // THE FRAMING IS PART OF THE PROMPT. The bias prompt is a whole sentence
+        // — "The following transcript mentions X, Y, Z. It is written in ordinary
+        // sentence case." — and this check used to know only about the terms, so
+        // a model that parroted the framing back had it delivered as the user's
+        // dictation. That is the invented-words failure in its purest form, and
+        // it is why biasing could not be switched on. Nobody says these
+        // sentences out loud, so an exact-phrase test carries no risk to real
+        // speech.
+        for framing in [TranscriptionContext.promptLeadIn, TranscriptionContext.promptTrailer] {
+            let phrase = normalized(framing)
+            guard phrase.split(separator: " ").count >= 3 else { continue }
+            if normalizedText.contains(phrase) { return true }
+        }
+        let words = normalizedText.split(separator: " ").map(String.init)
         guard words.count >= 4 else { return false }
         // Multi-word terms contribute each of their words.
         var termWords = Set<String>()

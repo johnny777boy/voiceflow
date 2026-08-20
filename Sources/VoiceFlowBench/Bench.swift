@@ -157,12 +157,12 @@ import VoiceFlowWhisper
         // exact confusion cost this project eight days.
         let bias = biasTerms.isEmpty
             ? "none"
-            : "\(biasTerms.count) terms, prompt \(UserDefaults.standard.bool(forKey: "whisperPromptBiasingEnabled") ? "FED" : "withheld")"
+            : "\(biasTerms.count) terms, prompt \((UserDefaults.standard.object(forKey: "whisperPromptBiasingEnabled") as? Bool ?? true) ? "FED" : "withheld")"
         if !biasTerms.isEmpty {
             // The OFF arm deliberately passes --bias too, so the context (and
             // therefore the echo-discard and voting paths) is identical and the
             // ONLY difference is whether a prompt is fed.
-            let enabled = UserDefaults.standard.bool(forKey: "whisperPromptBiasingEnabled")
+            let enabled = UserDefaults.standard.object(forKey: "whisperPromptBiasingEnabled") as? Bool ?? true
             let prompt = TranscriptionContext(vocabularyTerms: biasTerms).promptText()
             FileHandle.standardError.write(
                 "  bias prompt : \(enabled ? prompt : "(biasing OFF — control arm, context still supplied)")\n"
