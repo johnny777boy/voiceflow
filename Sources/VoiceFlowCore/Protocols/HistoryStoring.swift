@@ -22,14 +22,14 @@ public protocol HistoryStoring: AnyObject, Sendable {
     /// so history shows what is actually in the user's field. Missing records are
     /// ignored — the record may have been trimmed.
     func updateCleanText(_ text: String, id: UUID) throws
-    /// Mark a record as flagged wrong by the user (the one-key error report).
-    func setFlaggedWrong(id: UUID) throws
+    /// Set or clear the user's wrong-flag on a record (the one-key error report).
+    func setFlaggedWrong(_ flagged: Bool, id: UUID) throws
 }
 
 public extension HistoryStoring {
-    func setFlaggedWrong(id: UUID) throws {
-        guard var record = try record(id: id), !record.flaggedWrong else { return }
-        record.flaggedWrong = true
+    func setFlaggedWrong(_ flagged: Bool, id: UUID) throws {
+        guard var record = try record(id: id), record.flaggedWrong != flagged else { return }
+        record.flaggedWrong = flagged
         try save(record)
     }
 

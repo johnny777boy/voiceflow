@@ -330,12 +330,9 @@ final class AppCoordinator: ObservableObject {
                                                 controlHeld: mods.contains(.control)) else { return }
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                if await self.controller.flagLastDictation() != nil {
-                    // The ack must be UNMISSABLE — a quiet purr left him
-                    // pressing the key four times believing it was broken.
-                    // Clear sound + the on-screen overlay both fire.
-                    NSSound(named: "Glass")?.play()
-                    self.overlay.show(state: .flagged)
+                if let nowFlagged = await self.controller.flagLastDictation() {
+                    NSSound(named: nowFlagged ? "Glass" : "Pop")?.play()
+                    self.overlay.show(state: nowFlagged ? .flagged : .unflagged)
                 }
             }
         }
