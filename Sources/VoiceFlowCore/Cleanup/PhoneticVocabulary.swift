@@ -11,14 +11,22 @@ import Foundation
 /// IS the defect: he can only ever add the ones that already cost him. One
 /// entry should cover anything that SOUNDS like it.
 ///
-/// WHY IT IS CONSERVATIVE. This runs BEFORE `CleanupGuard`, on the raw
-/// transcript, so nothing downstream will catch a mistake it makes — the user's
-/// own dictionary is trusted by design. It may therefore only replace a token
-/// when the evidence is strong, and it can never introduce a word that is not
-/// already in his vocabulary. The bar is deliberately set so that ordinary
-/// words which merely resemble an entry ("code" vs "Codex") survive untouched:
-/// a missed correction costs one wrong word, a false correction destroys a word
-/// he actually said, and the second is the failure this whole product refuses.
+/// DETECTION ONLY — IT NEVER REWRITES TEXT, and this header once said otherwise.
+/// (Reviewer finding 2026-08-19: the old wording described a replacer, which is
+/// an invitation to wire one up.) It cannot replace, because "codecs" and
+/// "codices" are ordinary English words and nothing in text can tell "he said
+/// codecs" from "Codex was misheard as codecs" — only acoustic context can, and
+/// it is gone by the time text exists. A missed correction costs one wrong word;
+/// a false correction destroys a word he actually said, and the second is the
+/// failure this product refuses.
+///
+/// NOT YET WIRED INTO THE APP. Measured false-positive rate on ordinary
+/// construction speech is too high to put in front of the user ("the cortex of
+/// the beam" → Codex; "the payload of the truck" → Payload CMS), and an
+/// approved suggestion becomes a DETERMINISTIC replacement, so a bad suggestion
+/// ends in mutation on false evidence. The span scorer must first stop
+/// preferring a longer span that swallows an already-correct term
+/// ("payload of" beating "payload"). Tracked in docs/BACKLOG.md.
 public struct PhoneticVocabulary: Sendable {
 
     private struct Target: Sendable {

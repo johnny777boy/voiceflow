@@ -199,6 +199,19 @@ func proveGuard() {
         .init(what: "removes a filled pause",
               said: "um we should order the tile on monday",
               ai:   "We should order the tile on Monday."),
+        // Added after review: the clause rule refused six of seven realistic
+        // splits, and this proof reported "all correct" anyway because its one
+        // split case dodged every trigger word. A proof that cannot fail is not
+        // a proof.
+        .init(what: "splits an honest run-on starting with 'After'",
+              said: "we set the forms after that we poured the slab",
+              ai:   "We set the forms. After that, we poured the slab."),
+        .init(what: "splits an honest run-on ending on 'to'",
+              said: "i told him not to he did it anyway",
+              ai:   "I told him not to. He did it anyway."),
+        .init(what: "keeps an abbreviation from reading as a sentence end",
+              said: "meet me at 8 a.m. that works for me",
+              ai:   "Meet me at 8 a.m. That works for me."),
     ]
 
     var failures = 0
@@ -225,7 +238,10 @@ func proveGuard() {
     }
     if failures == 0 {
         print("\u{001B}[32m\u{001B}[1mAll \(mustRefuse.count + mustAllow.count) checks behaved correctly.\u{001B}[0m")
-        print("The AI cannot change your meaning, and it can still fix your English.\n")
+        print("The AI cannot change your meaning, and it can still fix your English.")
+        print("\u{001B}[2mThis covers SAFETY — that cleanup does not alter your words. It says")
+        print("nothing about whether the engine HEARD you correctly; only a WER run")
+        print("on your own voice can answer that (Scripts/bench_session.sh).\u{001B}[0m\n")
     } else {
         print("\u{001B}[31m\u{001B}[1m\(failures) FAILED — do not trust this build.\u{001B}[0m\n")
     }

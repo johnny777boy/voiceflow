@@ -172,27 +172,42 @@ public enum CleanupGuard {
 
     /// Words that cannot END a sentence cleanup invented: each one demands a
     /// continuation, so a full stop after it means the clause was cut in half.
-    /// Particles that legitimately end English sentences ("turn it off", "slow
-    /// down", "come over") are deliberately absent.
+    ///
+    /// NARROWED after review, 2026-08-19. The first version listed every
+    /// preposition and included "to", "for", "with", "when", "like", "that" —
+    /// and English ends sentences on all of them ("I told him not TO.",
+    /// "That's what it's FOR.", "That's what it looks LIKE."). It refused six
+    /// of seven realistic splits. False positives are not cheap here: a split
+    /// changes the sentence count, `safelyMerged` can no longer reconcile per
+    /// sentence, and ONE bad verdict discards every repair in the dictation.
+    /// Particles that legitimately end sentences ("turn it off", "slow down")
+    /// were already absent.
     static let cannotEndSentence: Set<String> = [
         "a", "an", "the", "my", "your", "our", "their", "his", "her", "its",
-        "of", "to", "into", "onto", "with", "from", "at", "for", "upon",
-        "during", "within", "between", "among", "toward", "towards",
-        "and", "but", "or", "nor", "because", "although", "though", "while",
-        "whereas", "unless", "until", "whether", "if", "when", "since", "than",
-        "like", "that",
+        "of", "into", "onto", "and", "but", "or", "nor", "because", "although",
+        "though", "whereas", "unless",
     ]
 
     /// Words that cannot START a sentence cleanup invented: each binds BACKWARD
     /// to the clause before it, so putting a full stop in front of one changes
     /// what was said. "Call me before the meeting" is not "Call me."
     ///
-    /// "so", "then", "and" and "but" are deliberately absent — he opens
-    /// sentences with them constantly, and those breaks are honest.
+    /// NARROWED after review, 2026-08-19 to the words that bind backward and
+    /// essentially nothing else. "that", "which", "who", "after", "since",
+    /// "than", "though" were the false-positive engine: they are far more often
+    /// ordinary sentence openers ("THAT was the last thing.", "AFTER that, we
+    /// poured the slab.", "SINCE then we've been waiting.") than subordinators
+    /// binding to the clause before. "so", "then", "and", "but" were already
+    /// absent — he opens sentences with them constantly.
     static let cannotStartSentence: Set<String> = [
-        "because", "before", "after", "until", "unless", "if", "when", "while",
-        "since", "than", "though", "although", "whereas", "whenever", "wherever",
-        "that", "which", "who", "whom", "whose",
+        "because", "before", "until", "unless", "if", "while",
+    ]
+
+    /// Fragments that take a period without ending a sentence.
+    static let sentenceSafeAbbreviations: Set<String> = [
+        "mr", "mrs", "ms", "dr", "st", "ave", "rd", "blvd", "apt", "ste",
+        "jr", "sr", "vs", "etc", "eg", "ie", "approx", "dept", "inc", "co",
+        "am", "pm", "no", "sq", "ft", "in", "min", "max", "est",
     ]
 
     /// Each word with the sentence terminator that immediately follows it.
@@ -204,7 +219,17 @@ public enum CleanupGuard {
                 current.append(ch)
             } else {
                 if !current.isEmpty {
-                    out.append((current, ".!?".contains(ch) ? ch : nil))
+                    // A period after a known abbreviation, an initial, or a
+                    // digit is not a sentence end. `sentencePieces` in this same
+                    // file already knew that; this function did not, so every
+                    // "a.m." the cleanup wrote read as a sentence dangling on
+                    // "a". Two functions disagreeing about where a sentence
+                    // stops is how a guard reports nonsense.
+                    let abbreviation = ch == "." &&
+                        (Self.sentenceSafeAbbreviations.contains(current)
+                         || current.count == 1
+                         || current.allSatisfy(\.isNumber))
+                    out.append((current, (".!?".contains(ch) && !abbreviation) ? ch : nil))
                     current = ""
                 } else if ".!?".contains(ch), let last = out.indices.last, out[last].terminator == nil {
                     out[last].terminator = ch

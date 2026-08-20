@@ -406,10 +406,45 @@ func runVerbatimTests(_ s: TestSuite) {
                 cleaned: "I will not send it. Until you confirm.", policy: p),
                 "a condition was severed from its promise (\(p))")
             s.expectFalse(CleanupGuard.preservesMeaning(
-                original: "we need to actually like go to the backlog",
-                cleaned: "we need to actually like. Go to the backlog.", policy: p),
-                "a sentence was left dangling on a function word (\(p))")
+                original: "the crew is here and we can start the demo",
+                cleaned: "The crew is here and. We can start the demo.",
+                policy: p),
+                "a sentence was left dangling on a conjunction (\(p))")
         }
+    }
+
+    s.test("guard: the clause rule must not eat honest splits (reviewer cases)") { s in
+        // Reviewer finding, 2026-08-19: the first version of severedClause
+        // refused SIX of seven realistic, meaning-preserving splits. That is
+        // worse than it sounds — a split changes the sentence count, so
+        // safelyMerged cannot reconcile per sentence and falls back to
+        // all-or-nothing. One false rejection therefore throws away every
+        // repair in the dictation, which is the exact failure safelyMerged was
+        // added to fix.
+        let p = CleanupGuard.Policy.grammarRepair
+        for (said, proposed) in [
+            ("we set the forms after that we poured the slab",
+             "We set the forms. After that, we poured the slab."),
+            ("the drywall is done that was the last thing",
+             "The drywall is done. That was the last thing."),
+            ("thats what it looks like and then we move on",
+             "That's what it looks like. And then we move on."),
+            ("i told him not to he did it anyway",
+             "I told him not to. He did it anyway."),
+            ("the inspector came since then we have been waiting",
+             "The inspector came. Since then we have been waiting."),
+        ] {
+            s.expect(CleanupGuard.preservesMeaning(original: said, cleaned: proposed, policy: p),
+                     "wrongly refused an honest split: \(proposed)")
+        }
+        // "a.m." is not a sentence end. tokensWithTerminators had no
+        // abbreviation handling while sentencePieces — same file — did, so the
+        // two disagreed about where a sentence stops and every a.m./p.m./e.g.
+        // the cleanup wrote was read as a dangling "a".
+        s.expect(CleanupGuard.preservesMeaning(
+            original: "meet me at 8 a.m. that works for me",
+            cleaned: "Meet me at 8 a.m. That works for me.", policy: p),
+            "an abbreviation was mistaken for a severed clause")
     }
 
     s.test("guard: honest sentence breaks still pass") { s in
