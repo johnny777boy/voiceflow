@@ -1,5 +1,6 @@
 import SwiftUI
 import VoiceFlowCore
+import VoiceFlowWhisper
 
 /// Preferences window. Edits a local draft of `AppSettings` and applies changes
 /// back to the coordinator (which persists them and reconfigures the controller).

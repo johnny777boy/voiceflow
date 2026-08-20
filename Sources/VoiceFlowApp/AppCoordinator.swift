@@ -4,6 +4,7 @@ import SwiftUI
 import AVFoundation
 import Speech
 import VoiceFlowCore
+import VoiceFlowWhisper
 
 /// Observable app state that bridges the SwiftUI UI with the `DictationController`
 /// actor and the global hotkey. Owns permission flow, settings persistence, and

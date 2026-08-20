@@ -16,9 +16,16 @@ import VoiceFlowCore
 /// Until then `isReady` is false and the `FallbackTranscriber` routes dictations
 /// to the Apple engine, so nothing ever fails or blocks on the ~1 GB download.
 @available(macOS 14.0, *)
-final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
+public final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
     private let lock = NSLock()
     private var pipeline: WhisperKit?
+    /// When true the capture file is NEVER deleted after a successful decode.
+    /// A paired model A/B decodes the same audio under both models, so the
+    /// production "delete on success" behaviour would destroy the experiment
+    /// after the first run. Off in the app; set only by the benchmark.
+    public var retainCaptureFile = false
+
+    public init() {}
     private var suppressTokens: [Int] = []
 
     /// Second-opinion engine for phantom suppression (the Apple engine). Whisper
@@ -27,16 +34,16 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
     /// whole output is a known phantom phrase, the same recording is re-checked
     /// here: arbiter hears words ⇒ genuine speech, deliver; arbiter hears
     /// nothing ⇒ silence, discard. Real speech can never be eaten by this veto.
-    var silenceArbiter: Transcribing?
+    public var silenceArbiter: Transcribing?
 
     /// Thread-safe readiness check for the per-dictation route.
-    var isReady: Bool {
+    public var isReady: Bool {
         lock.lock(); defer { lock.unlock() }
         return pipeline != nil
     }
 
     /// Called by `WhisperModelManager` once the model is downloaded and loaded.
-    func adopt(_ loaded: WhisperKit) {
+    public func adopt(_ loaded: WhisperKit) {
         // Resolve the non-speech suppression token set once per loaded model
         // (token ids differ across vocab versions, so never hardcode them).
         let tokens = loaded.tokenizer.map(Self.nonSpeechTokens) ?? []
@@ -110,13 +117,13 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         return Array(tokens.prefix(maxTokens))
     }
 
-    func requestPermission() async -> Bool { true }   // mic handled by the recorder
+    public func requestPermission() async -> Bool { true }   // mic handled by the recorder
 
-    func transcribe(_ audio: AudioCapture, languageCode: String) async throws -> VoiceFlowCore.TranscriptionResult {
+    public func transcribe(_ audio: AudioCapture, languageCode: String) async throws -> VoiceFlowCore.TranscriptionResult {
         try await transcribe(audio, languageCode: languageCode, context: .empty)
     }
 
-    func transcribe(
+    public func transcribe(
         _ audio: AudioCapture, languageCode: String, context: VoiceFlowCore.TranscriptionContext
     ) async throws -> VoiceFlowCore.TranscriptionResult {
         guard let (wk, suppress) = currentPipeline() else {
@@ -172,7 +179,7 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         // silence defense lives in the energy gate above + post-filter below.
         // Re-audit this (and prefill interaction, WhisperKit issue #27) on any
         // WhisperKit version bump.
-        options.supressTokens = suppress   // (sic — WhisperKit API spelling)
+        options.suppressTokens = suppress   // typo `supressTokens` was fixed upstream in v1.0.0
         options.withoutTimestamps = true
         options.wordTimestamps = false
         options.chunkingStrategy = ChunkingStrategy.none
@@ -251,7 +258,7 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
                 audio, languageCode: languageCode, context: context)
             switch echoVerdict {
             case .heard(let second):
-                try? FileManager.default.removeItem(at: url)
+                if !retainCaptureFile { try? FileManager.default.removeItem(at: url) }
                 // The other engine had no prompt to echo, so it is the tiebreak.
                 // Whisper's text stands ONLY if every word in it was independently
                 // produced by that engine too — then nothing came from the
@@ -294,7 +301,7 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
                     let merged = vote(primary: text, secondary: second, context: context)
                     // We still own the original capture (the arbiter only ever saw
                     // a copy), and this is the success path, so consume it here.
-                    try? FileManager.default.removeItem(at: url)
+                    if !retainCaptureFile { try? FileManager.default.removeItem(at: url) }
                     return VoiceFlowCore.TranscriptionResult(
                         text: merged, engineName: "whisper",
                         decodeSeconds: decodeSeconds, arbiterSeconds: phantomArbiterSeconds)
@@ -342,7 +349,7 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
                 audio, languageCode: languageCode, context: context)
             if case .heard(let second) = voteVerdict {
                 let merged = vote(primary: text, secondary: second, context: context)
-                try? FileManager.default.removeItem(at: url)
+                if !retainCaptureFile { try? FileManager.default.removeItem(at: url) }
                 return VoiceFlowCore.TranscriptionResult(
                     text: merged, engineName: "whisper",
                     decodeSeconds: decodeSeconds, arbiterSeconds: voteArbiterSeconds)
@@ -353,7 +360,7 @@ final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         // Success: the capture file is consumed here. On ANY failure above we leave
         // the file alone — the FallbackTranscriber re-runs the Apple engine, which
         // reads the same file via its internal URL.
-        try? FileManager.default.removeItem(at: url)
+        if !retainCaptureFile { try? FileManager.default.removeItem(at: url) }
         return VoiceFlowCore.TranscriptionResult(
             text: text, engineName: "whisper", decodeSeconds: decodeSeconds)
     }

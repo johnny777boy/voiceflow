@@ -1,5 +1,6 @@
 import SwiftUI
 import VoiceFlowCore
+import VoiceFlowWhisper
 
 /// The main app window. A visible, mouse-usable surface for dictation: hold the
 /// big button (or the global hotkey) to talk, switch modes, and see history.

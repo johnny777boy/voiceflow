@@ -9,8 +9,8 @@ import VoiceFlowCore
 /// `WhisperKitTranscriber`. Until that moment every dictation keeps using the
 /// Apple engine via `FallbackTranscriber` — nothing fails, nothing blocks.
 @MainActor
-final class WhisperModelManager: ObservableObject {
-    enum State: Equatable {
+public final class WhisperModelManager: ObservableObject {
+    public enum State: Equatable {
         case idle                    // toggle off, or not started
         case downloading(Double)     // fraction 0…1
         case preparing               // downloaded; loading + ANE specialization
@@ -18,7 +18,7 @@ final class WhisperModelManager: ObservableObject {
         case failed(String)
     }
 
-    @Published private(set) var state: State = .idle
+    @Published public private(set) var state: State = .idle
 
     /// Verified against the argmaxinc/whisperkit-coreml repo listing: resolves to
     /// folder "openai_whisper-large-v3-v20240930_turbo" — OpenAI's large-v3-turbo
@@ -46,13 +46,13 @@ final class WhisperModelManager: ObservableObject {
     ///     -string "openai_whisper-large-v3-v20240930"
     ///
     /// Settable via the override below without a rebuild.
-    static let defaultModelVariant = "openai_whisper-large-v3-v20240930_turbo"
+    public static let defaultModelVariant = "openai_whisper-large-v3-v20240930_turbo"
     private static let variantOverrideDefaultsKey = "whisperModelVariant"
-    static var modelVariant: String {
+    public static var modelVariant: String {
         UserDefaults.standard.string(forKey: variantOverrideDefaultsKey) ?? defaultModelVariant
     }
 
-    nonisolated static let enabledDefaultsKey = "useWhisperEngine"
+    public nonisolated static let enabledDefaultsKey = "useWhisperEngine"
     private nonisolated static let modelFolderDefaultsKey = "whisperModelFolderPath"
 
     private let transcriber: WhisperKitTranscriber
@@ -61,21 +61,21 @@ final class WhisperModelManager: ObservableObject {
     /// every state write so they can never race a newer run (see ensureReady).
     private var generation: UInt64 = 0
 
-    init(transcriber: WhisperKitTranscriber) {
+    public init(transcriber: WhisperKitTranscriber) {
         self.transcriber = transcriber
     }
 
-    static var isEnabled: Bool {
+    public static var isEnabled: Bool {
         UserDefaults.standard.bool(forKey: enabledDefaultsKey)
     }
 
     /// Kick off download/load at launch when the user already opted in.
-    func bootstrapIfEnabled() {
+    public func bootstrapIfEnabled() {
         if Self.isEnabled { ensureReady() }
     }
 
     /// Toggle handler: on → background download+load; off → cancel and unload.
-    func setEnabled(_ on: Bool) {
+    public func setEnabled(_ on: Bool) {
         UserDefaults.standard.set(on, forKey: Self.enabledDefaultsKey)
         if on {
             ensureReady()
@@ -88,7 +88,7 @@ final class WhisperModelManager: ObservableObject {
         }
     }
 
-    func retry() {
+    public func retry() {
         guard Self.isEnabled else { state = .idle; return }
         // An explicit retry is the user accepting the cost of a fresh attempt
         // even if a watchdog-orphaned load is still running, so the handle is
@@ -259,6 +259,37 @@ final class WhisperModelManager: ObservableObject {
     }
 
     // MARK: - Disk locations
+
+    /// Load a pipeline for `variant` exactly the way the app loads it.
+    ///
+    /// Exists so `VoiceFlowBench` can decode with the SAME configuration the
+    /// app uses — the tokenizer/downloadBase pinning below is not cosmetic, it
+    /// is the fix for the defect that silently killed the engine for eight
+    /// days, and a benchmark that skipped it would be measuring a different
+    /// program than the one Yoni dictates into.
+    ///
+    /// Downloads if the variant is not present, which is exactly what a model
+    /// A/B needs the first time it runs.
+    public static func loadPipeline(
+        variant: String,
+        onDownloadProgress: (@Sendable (Double) -> Void)? = nil
+    ) async throws -> WhisperKit {
+        let folder = try await WhisperKit.download(
+            variant: variant,
+            downloadBase: downloadBase(),
+            progressCallback: { p in onDownloadProgress?(p.fractionCompleted) }
+        )
+        let config = WhisperKitConfig(
+            model: variant,
+            downloadBase: downloadBase(),
+            modelFolder: folder.path,
+            tokenizerFolder: downloadBase(),
+            prewarm: true,
+            load: true,
+            download: false
+        )
+        return try await WhisperKit(config)
+    }
 
     /// ~/Library/Application Support/VoiceFlow/Models — NOT the WhisperKit default
     /// (~/Documents/huggingface), which would dump a gigabyte into Documents.
