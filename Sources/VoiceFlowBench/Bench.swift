@@ -25,6 +25,18 @@ import VoiceFlowWhisper
 /// but an ABSOLUTE WER from here is not the app's WER.
 @main struct Bench {
     static func main() async {
+        // Pause-structure probe (Codex diagnosis, 2026-08-20). Checked before
+        // anything else so it does not need the --audio plumbing.
+        if let idx = CommandLine.arguments.firstIndex(of: "--timings"),
+           idx + 1 < CommandLine.arguments.count {
+            guard #available(macOS 26.0, *) else { print("needs macOS 26"); exit(2) }
+            let variant = CommandLine.arguments.firstIndex(of: "--model").map {
+                CommandLine.arguments[$0 + 1]
+            } ?? WhisperModelManager.defaultModelVariant
+            do { try await printTimings(audio: CommandLine.arguments[idx + 1], model: variant) }
+            catch { FileHandle.standardError.write("timings failed: \(error)\n".data(using: .utf8)!) }
+            exit(0)
+        }
         var audioArgs: [String] = []
         var model = WhisperModelManager.defaultModelVariant
         var out: String?
