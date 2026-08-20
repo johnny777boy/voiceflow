@@ -17,9 +17,11 @@ import sqlite3, sys, json, re, os, datetime
 db, conf, since = sys.argv[1], sys.argv[2], float(sys.argv[3])
 B,G,Y,R,O = "\033[1m","\033[32m","\033[33m","\033[31m","\033[0m"
 con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+have = {r[1] for r in con.execute("PRAGMA table_info(transcripts)")}
+flag_col = ", flaggedWrong" if "flaggedWrong" in have else ", 0"
 rows = list(con.execute(
-    "select rawText, cleanText, engineUsed, cleanupDecision, editedAfterInsert, createdAt "
-    "from transcripts where createdAt > ? order by createdAt", (since,)))
+    "select rawText, cleanText, engineUsed, cleanupDecision, editedAfterInsert, createdAt"
+    + flag_col + " from transcripts where createdAt > ? order by createdAt", (since,)))
 if not rows:
     print(f"\n{B}Nothing dictated since the last check-up.{O} Nothing to judge.\n"); sys.exit(0)
 n = len(rows)
@@ -49,10 +51,13 @@ line(edited <= max(1, n*0.1), "You had to fix its output", f"{edited}/{n} times"
 line(runons <= max(1, n*0.05), "Giant run-on sentences", f"{runons}")
 line(True, "Grammar quietly repaired", f"{repaired} dictations")
 line(True, "Errors it caught from your retries", f"{retries}")
+flagged = sum(1 for r in rows if r[6])
+line(flagged == 0, "Dictations you flagged as wrong", f"{flagged}")
 problems = []
 if whisper < n*0.9: problems.append("the accurate engine missed dictations")
 if edited > max(1, n*0.1): problems.append("you edited too often")
 if runons > max(1, n*0.05): problems.append("run-ons are back")
+if flagged: problems.append(f"{flagged} flagged dictation(s) await the deep check")
 print()
 if not problems:
     print(f"  {G}{B}VERDICT: healthy. Keep dictating — nothing needed from you.{O}")

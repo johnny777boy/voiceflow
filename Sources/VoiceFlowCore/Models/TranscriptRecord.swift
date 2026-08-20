@@ -55,6 +55,9 @@ public struct TranscriptRecord: Codable, Sendable, Equatable, Hashable, Identifi
     public var cleanupRejectReason: String?
     /// A non-fatal error/warning message, if the event degraded (e.g. fell back to copy-only).
     public var errorMessage: String?
+    /// He pressed the flag key: "this dictation was wrong" — one keystroke, no
+    /// repeating, no editing. Evidence for the weekly deep check (2026-08-20).
+    public var flaggedWrong: Bool
     /// When the dictation happened.
     public var createdAt: Date
 
@@ -78,6 +81,7 @@ public struct TranscriptRecord: Codable, Sendable, Equatable, Hashable, Identifi
         cleanupDecision: String? = nil,
         cleanupRejectReason: String? = nil,
         errorMessage: String? = nil,
+        flaggedWrong: Bool = false,
         createdAt: Date = Date()
     ) {
         self.id = id
@@ -99,6 +103,7 @@ public struct TranscriptRecord: Codable, Sendable, Equatable, Hashable, Identifi
         self.cleanupDecision = cleanupDecision
         self.cleanupRejectReason = cleanupRejectReason
         self.errorMessage = errorMessage
+        self.flaggedWrong = flaggedWrong
         self.createdAt = createdAt
     }
 
@@ -125,6 +130,7 @@ public struct TranscriptRecord: Codable, Sendable, Equatable, Hashable, Identifi
         cleanupDecision = try c.decodeIfPresent(String.self, forKey: .cleanupDecision)
         cleanupRejectReason = try c.decodeIfPresent(String.self, forKey: .cleanupRejectReason)
         errorMessage = try c.decodeIfPresent(String.self, forKey: .errorMessage)
+        flaggedWrong = try c.decodeIfPresent(Bool.self, forKey: .flaggedWrong) ?? false
         createdAt = try c.decode(Date.self, forKey: .createdAt)
     }
 }
