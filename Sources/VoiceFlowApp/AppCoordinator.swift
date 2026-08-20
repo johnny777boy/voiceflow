@@ -335,7 +335,7 @@ final class AppCoordinator: ObservableObject {
                     // pressing the key four times believing it was broken.
                     // Clear sound + the on-screen overlay both fire.
                     NSSound(named: "Glass")?.play()
-                    self.overlay.show(state: .error("Flagged ✓ — last dictation marked wrong"))
+                    self.overlay.show(state: .flagged)
                 }
             }
         }

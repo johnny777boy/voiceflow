@@ -58,6 +58,10 @@ struct OverlayView: View {
         case .error:
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 15, weight: .semibold)).foregroundStyle(.yellow)
+        case .flagged:
+            Image(systemName: "flag.fill")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Color(red: 0.35, green: 0.85, blue: 0.5))
         }
     }
 
@@ -67,6 +71,7 @@ struct OverlayView: View {
         case .processing: return "Transcribing…"
         case .done(let r): return r.outcome.didInsert ? "Inserted" : "Copied to clipboard"
         case .error:      return "Try again"
+        case .flagged:    return "Got it — marked as wrong"
         }
     }
 }
