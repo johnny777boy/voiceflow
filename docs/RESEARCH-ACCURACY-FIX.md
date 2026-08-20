@@ -9,6 +9,54 @@ most important layer for a reason that was fixed upstream three weeks ago.**
 
 ---
 
+## Layer 0 — WE ARE RUNNING THE WRONG MODEL FOR HIM
+
+Yoni's actual complaint, in his words: *"the accuracy needs to be the same as
+Whisper, because he does it perfectly for me — and I'm not a native English
+speaker and it's still 99% perfect, it hears me correctly."*
+
+He is comparing us against Whisper. **We run Whisper too — but a smaller one.**
+Our default is `openai_whisper-large-v3-v20240930_turbo`: the *turbo* build,
+which keeps all 32 encoder layers but truncates the decoder from 32 layers to 4
+(1.55B → 809M parameters).
+
+The distillation is not free, and its cost is not evenly distributed:
+
+| | full large-v3 vs turbo |
+|---|---|
+| clean English | ~0.2 WER better |
+| **accented / non-native English** | **~1.1 WER better** |
+
+Per OpenAI's own benchmarks the penalty is roughly **five times larger on
+accented speech** — which is precisely Yoni's case. Whatever reference product
+he is comparing against, if it runs full large-v3 (the common default), that
+alone is a real, measurable gap, before biasing or vocabulary enter the picture.
+
+This trade was never WER-gated on his voice, which the standing rule
+("speed may never cost quality") requires of exactly this kind of choice.
+
+### The A/B was booby-trapped
+
+`WhisperModelManager` carried a comment saying full large-v3 is
+`openai_whisper-large-v3_turbo`. **That is wrong** — checked against the
+whisperkit-coreml repo's own file listing, every `*_turbo` folder is a turbo
+build. Anyone following that comment would have compared turbo against turbo,
+measured no difference, and wrongly cleared the model. Corrected in the source
+2026-08-19.
+
+The honest counterpart is **`openai_whisper-large-v3-v20240930`** — same
+conversion vintage as our default, differing only in the decoder. Switchable
+with no rebuild:
+
+```
+defaults write com.voiceflow.dictation whisperModelVariant \
+  -string "openai_whisper-large-v3-v20240930"
+```
+
+Then re-run `Scripts/wer_session.sh` and compare against the turbo baseline.
+Expect a bigger download and slower decode; the standing rule says accuracy
+wins, but only once the number exists.
+
 ## Layer 1 — Fix it at the RECOGNIZER (contextual biasing)
 
 The professional fix is not to patch the text afterwards. It is to tell the
@@ -104,9 +152,12 @@ construction and permanently blind in Electron. The professional shape is:
 
 ## Recommended order (highest leverage first)
 
-1. **Measure.** `Scripts/wer_session.sh` — 3 minutes, Yoni's voice. Nothing
-   below can be verified without a baseline, and the standing rule requires a
-   WER A/B for any accuracy change.
+1. **Measure, then A/B the MODEL.** `Scripts/wer_session.sh` on turbo (the
+   baseline), then again on full large-v3 via the `whisperModelVariant`
+   override. This is now the first move rather than the fourth: it is the
+   largest single lever for a non-native speaker (~1.1 WER on accented
+   English), it needs no code, and every other change below has to be measured
+   against this baseline anyway.
 2. **Upgrade WhisperKit 0.18.0 → v1.1.0 and re-enable biasing** behind the
    existing `whisperPromptBiasingEnabled` switch, then WER A/B it. Major version
    jump, so expect API changes; the dev switch already exists to ship it off
@@ -118,6 +169,10 @@ construction and permanently blind in Electron. The professional shape is:
 
 ## Sources
 
+- Whisper turbo release notes (decoder 32 → 4 layers) — https://github.com/openai/whisper/discussions/2363
+- openai/whisper-large-v3-turbo model card — https://huggingface.co/openai/whisper-large-v3-turbo
+- whisperkit-coreml model folder listing (proves `*_turbo` naming) — https://huggingface.co/argmaxinc/whisperkit-coreml
+- ASR for non-native English: accuracy and disfluency handling — https://arxiv.org/pdf/2503.06924
 - WhisperKit issue #372 — https://github.com/argmaxinc/WhisperKit/issues/372
 - WhisperKit PR #514 (the fix) — https://github.com/argmaxinc/WhisperKit/pull/514
 - WhisperKit releases (v1.1.0, 2026-08-06) — https://github.com/argmaxinc/WhisperKit/releases

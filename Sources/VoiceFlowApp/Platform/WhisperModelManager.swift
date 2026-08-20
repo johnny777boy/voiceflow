@@ -24,9 +24,28 @@ final class WhisperModelManager: ObservableObject {
     /// folder "openai_whisper-large-v3-v20240930_turbo" — OpenAI's large-v3-turbo
     /// in Argmax's ANE-optimized conversion. NOTE the previous value
     /// "large-v3-turbo" matched NO folder in the repo and always failed.
-    /// For the WER A/B, "openai_whisper-large-v3_turbo" is FULL large-v3 (no
-    /// 4-layer decoder truncation, ~1 WER better on accents, bigger + slower) —
-    /// settable via the override below without a rebuild.
+    /// WRONG BEFORE, CORRECTED 2026-08-19 against the repo's own file listing:
+    /// `openai_whisper-large-v3_turbo` is ALSO a turbo build (every `*_turbo`
+    /// folder is). The A/B this comment described would therefore have compared
+    /// turbo against turbo, measured "no difference", and wrongly cleared the
+    /// model — the same shape of plausible-but-false result as the dead-engine
+    /// week.
+    ///
+    /// FULL large-v3 is `openai_whisper-large-v3-v20240930` — the same
+    /// conversion vintage as the default, differing ONLY in the decoder (32
+    /// layers vs turbo's 4). That makes it the honest A/B counterpart.
+    ///
+    /// Why it matters here specifically: OpenAI's own benchmarks put full
+    /// large-v3 ahead of turbo by ~0.2 WER on clean English but ~1.1 WER on
+    /// ACCENTED English. Yoni is a non-native speaker, so he sits in the case
+    /// where the distillation costs the most — and this trade was never
+    /// WER-gated, which the standing "speed may never cost quality" rule
+    /// requires. Bigger and slower; measure before adopting.
+    ///
+    ///   defaults write com.voiceflow.dictation whisperModelVariant \
+    ///     -string "openai_whisper-large-v3-v20240930"
+    ///
+    /// Settable via the override below without a rebuild.
     static let defaultModelVariant = "openai_whisper-large-v3-v20240930_turbo"
     private static let variantOverrideDefaultsKey = "whisperModelVariant"
     static var modelVariant: String {
