@@ -3,6 +3,16 @@
 ## ▶️ RESUME HERE (2026-08-19)
 
 
+**2026-08-19 EVENING — the full parity plan is in
+`docs/RESEARCH-WISPR-PARITY-PLAN.md` (agent-researched, cited).** Wispr = cloud
+scale + context injection + a privacy bill we refuse; our gaps are the turbo
+model, dead biasing (upstream-fixed, needs v1.1.0 — BREAKING upgrade), and
+exact-match vocab. Their #1 shipped failure is the thing CleanupGuard prevents.
+NOTE: the 136-word WER script cannot resolve the model question (one error =
+0.74 WER) — plan step d.0 upgrades measurement FIRST (retain capture audio,
+same-audio A/B, ~1,000 words, paired bootstrap, entity-WER). Do d.0 before
+trusting ANY accuracy number beyond catastrophe detection.
+
 **2026-08-19 RESEARCH — read `docs/RESEARCH-ACCURACY-FIX.md` first.** He said
 Whisper hears him 99% correctly and we do not. We run Whisper too — but the
 **turbo** build (decoder truncated 32→4 layers). OpenAI's benchmarks: full
