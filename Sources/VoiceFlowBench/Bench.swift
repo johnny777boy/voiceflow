@@ -25,6 +25,22 @@ import VoiceFlowWhisper
 /// but an ABSOLUTE WER from here is not the app's WER.
 @main struct Bench {
     static func main() async {
+        // Parakeet shadow benchmark — a different ENGINE, not a bigger Whisper.
+        if CommandLine.arguments.contains("--parakeet") {
+            guard #available(macOS 14.0, *) else { print("needs macOS 14"); exit(2) }
+            var files: [URL] = []
+            if let i = CommandLine.arguments.firstIndex(of: "--audio") {
+                var k = i + 1
+                while k < CommandLine.arguments.count, !CommandLine.arguments[k].hasPrefix("-") {
+                    files += expand([CommandLine.arguments[k]]); k += 1
+                }
+            }
+            let out = CommandLine.arguments.firstIndex(of: "--out").map { CommandLine.arguments[$0 + 1] }
+            do { try await runParakeet(files: files.sorted { $0.lastPathComponent < $1.lastPathComponent }, out: out) }
+            catch { FileHandle.standardError.write("parakeet failed: \(error)\n".data(using: .utf8)!); exit(1) }
+            exit(0)
+        }
+
         // Pause-structure probe (Codex diagnosis, 2026-08-20). Checked before
         // anything else so it does not need the --audio plumbing.
         if let idx = CommandLine.arguments.firstIndex(of: "--timings"),
@@ -157,12 +173,12 @@ import VoiceFlowWhisper
         // exact confusion cost this project eight days.
         let bias = biasTerms.isEmpty
             ? "none"
-            : "\(biasTerms.count) terms, prompt \(UserDefaults.standard.bool(forKey: "whisperPromptBiasingEnabled") ? "FED" : "withheld")"
+            : "\(biasTerms.count) terms, prompt \((UserDefaults.standard.object(forKey: "whisperPromptBiasingEnabled") as? Bool ?? true) ? "FED" : "withheld")"
         if !biasTerms.isEmpty {
             // The OFF arm deliberately passes --bias too, so the context (and
             // therefore the echo-discard and voting paths) is identical and the
             // ONLY difference is whether a prompt is fed.
-            let enabled = UserDefaults.standard.bool(forKey: "whisperPromptBiasingEnabled")
+            let enabled = UserDefaults.standard.object(forKey: "whisperPromptBiasingEnabled") as? Bool ?? true
             let prompt = TranscriptionContext(vocabularyTerms: biasTerms).promptText()
             FileHandle.standardError.write(
                 "  bias prompt : \(enabled ? prompt : "(biasing OFF — control arm, context still supplied)")\n"

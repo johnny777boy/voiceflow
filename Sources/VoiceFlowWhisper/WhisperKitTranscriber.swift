@@ -234,18 +234,30 @@ public final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         // startOfPreviousToken, filtered below specialTokenBegin, and the prefill
         // KV-cache is bypassed whenever promptTokens is set — the PR #514
         // behavior this feature depends on.
-        // DISABLED (2026-08-18, lived defect): feeding promptTokens silenced the
-        // decoder COMPLETELY — every dictation decoded to zero characters and
-        // fell back to the Apple engine, for over a week, with no visible error.
-        // Proven live by A/B: prompt off ⇒ Whisper transcribes normally; prompt
-        // on ⇒ 0 chars, every time. Root cause in WhisperKit 0.18's prompt
-        // handling is still to be isolated (see BACKLOG); until it is fixed and
-        // WER-verified, no prompt is fed. Whisper without biasing beats Apple
-        // with it — the accuracy floor comes first.
-        // Dev switch (`defaults write com.voiceflow.dictation whisperPromptBiasingEnabled -bool YES`)
-        // so the eventual fix can be A/B-tested live without a rebuild. Ships false.
+        // ENABLED 2026-08-20, after three things were true at once.
+        //
+        // 1. THE ORIGINAL DEFECT IS FIXED UPSTREAM. Feeding promptTokens under
+        //    WhisperKit 0.18 silenced the decoder completely — every dictation
+        //    decoded to zero characters and fell back to the Apple engine, for
+        //    over a week, with no visible error. That was a prefill/EOT bug,
+        //    fixed in argmax PR #514 and shipped in v1.1.0, which this package
+        //    now pins.
+        // 2. IT IS MEASURED ON HIS VOICE, not assumed. Same audio, same model,
+        //    only the prompt changing: entity recall 50% -> 83% (3/6 -> 5/6) and
+        //    overall WER 13.79% -> 12.07%. "CloudCode" became "Claude Code";
+        //    "to domain" became "to the main". That is exactly the signature the
+        //    biasing literature describes — the words he cares about move a lot,
+        //    overall WER moves a little.
+        // 3. THE ECHO HOLE IS CLOSED. The prompt is a whole sentence, and
+        //    `looksLikePromptEcho` used to check only the TERMS — so a model
+        //    parroting the framing back would have had it delivered as his
+        //    dictation. It now catches the framing too.
+        //
+        // Still fully reversible, because this is the decode path:
+        //   defaults write com.voiceflow.dictation whisperPromptBiasingEnabled -bool NO
         var promptWasFed = false
-        if UserDefaults.standard.bool(forKey: "whisperPromptBiasingEnabled"),
+        let biasingEnabled = UserDefaults.standard.object(forKey: "whisperPromptBiasingEnabled") as? Bool ?? true
+        if biasingEnabled,
            let tokenizer = wk.tokenizer,
            let prompt = Self.promptTokens(for: context, tokenizer: tokenizer) {
             options.promptTokens = prompt

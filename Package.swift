@@ -24,7 +24,11 @@ let package = Package(
     ],
     dependencies: [
         // On-device Whisper (Core ML / Neural Engine) for the optional High-Accuracy mode.
-        .package(url: "https://github.com/argmaxinc/WhisperKit", from: "1.1.0")
+        .package(url: "https://github.com/argmaxinc/WhisperKit", from: "1.1.0"),
+        // BENCH ONLY. Parakeet (NVIDIA) via CoreML — Codex's one serious engine
+        // suggestion, to be judged offline on his archived audio before any
+        // integration is considered. The app does NOT link this.
+        .package(url: "https://github.com/FluidInference/FluidAudio", from: "0.15.0")
     ],
     targets: [
         .target(
@@ -60,7 +64,11 @@ let package = Package(
         ),
         .executableTarget(
             name: "VoiceFlowBench",
-            dependencies: ["VoiceFlowCore", "VoiceFlowWhisper"]
+            dependencies: [
+                "VoiceFlowCore",
+                "VoiceFlowWhisper",
+                .product(name: "FluidAudio", package: "FluidAudio")
+            ]
         ),
         .executableTarget(
             name: "VoiceFlowReplay",

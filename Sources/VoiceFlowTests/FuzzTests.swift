@@ -264,3 +264,75 @@ func runLeadingSilenceTests(_ s: TestSuite) {
         s.expectEqual(Array(out.suffix(100)), Array(clip.suffix(100)))
     }
 }
+
+/// His own confusions, learned from his own corrections (2026-08-20).
+func runPersonalConfusionTests(_ s: TestSuite) {
+    typealias Rule = PersonalConfusions.Rule
+
+    s.test("confusions: a correction is mined down to the phrase that changed") { s in
+        // His real error. The rule must be "a new well" -> "and you walk"
+        // reversed, NOT the whole sentence — memorising sentences makes the
+        // table useless on anything he has not said verbatim before.
+        let found = PersonalConfusions.confusions(
+            heard: "we need to dig and you walk behind the garage",
+            said:  "we need to dig a new well behind the garage")
+        s.expectEqual(found.count, 1)
+        s.expectEqual(found.first?.heard, "and you walk")
+        s.expectEqual(found.first?.said, "a new well")
+    }
+
+    s.test("confusions: a missing or extra word is NOT learned as a confusion") { s in
+        // "or all the words" -> "all the words" is a DELETION by the recogniser.
+        // Turning that into a lookup rule would make the table insert "or"
+        // wherever those words appear — inventing a word he did not say.
+        s.expect(PersonalConfusions.confusions(
+            heard: "all the words I never said",
+            said:  "or all the words I never said").isEmpty)
+        s.expect(PersonalConfusions.confusions(
+            heard: "the framing is okay thank you",
+            said:  "the framing is okay").isEmpty)
+    }
+
+    s.test("confusions: one sighting is a coincidence, two is a pattern") { s in
+        let once = PersonalConfusions(rules: [Rule(heard: "wrench", said: "rented")])
+        s.expectEqual(once.apply(to: "we want to wrench it out").text, "we want to wrench it out")
+        var rules = [Rule]()
+        rules = PersonalConfusions.learning(rules, heard: "wrench", said: "rented")
+        rules = PersonalConfusions.learning(rules, heard: "wrench", said: "rented")
+        s.expectEqual(rules.count, 1)
+        s.expectEqual(rules.first?.sightings, 2)
+        s.expectEqual(PersonalConfusions(rules: rules).apply(to: "we want to wrench it out").text,
+                      "we want to rented it out")
+    }
+
+    s.test("confusions: only whole words, and every change is reported") { s in
+        let rules = [Rule(heard: "cloud code", said: "Claude Code", sightings: 3)]
+        let table = PersonalConfusions(rules: rules)
+        let hit = table.apply(to: "Cloud Code should handle the migration")
+        s.expectEqual(hit.text, "Claude Code should handle the migration")
+        s.expectEqual(hit.corrections.count, 1)
+        // A word that merely CONTAINS the phrase is untouched: substring
+        // matching here would rewrite words he really said.
+        let miss = table.apply(to: "the cloudcodes are fine")
+        s.expectEqual(miss.text, "the cloudcodes are fine")
+        s.expect(miss.isEmpty)
+    }
+
+    s.test("confusions: the longest match wins") { s in
+        // "a new well" must beat a rule for "well" alone, or the specific fix is
+        // shadowed by the general one.
+        let table = PersonalConfusions(rules: [
+            Rule(heard: "walk", said: "well", sightings: 2),
+            Rule(heard: "and you walk", said: "a new well", sightings: 2),
+        ])
+        s.expectEqual(table.apply(to: "dig and you walk behind the garage").text,
+                      "dig a new well behind the garage")
+    }
+
+    s.test("confusions: an empty table never touches his words") { s in
+        let text = "Ask Codex to verify the branch before we merge it to main"
+        let table = PersonalConfusions(rules: [])
+        s.expectEqual(table.apply(to: text).text, text)
+        s.expect(table.apply(to: text).isEmpty)
+    }
+}
