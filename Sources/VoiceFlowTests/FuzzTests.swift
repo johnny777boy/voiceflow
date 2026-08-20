@@ -129,3 +129,58 @@ func runFuzzTests(_ s: TestSuite) {
         }
     }
 }
+
+/// The app noticing its own mishearings (2026-08-19).
+func runDoubtTests(_ s: TestSuite) {
+
+    s.test("doubt: two engines disagreeing localises the actual error") { s in
+        // The real case, from his audio tonight. The small model heard "wrench",
+        // the large one "rent" — and the disagreement is precisely the error,
+        // even though nothing here knows which side is right.
+        let doubt = TranscriptDoubt.assess(
+            text: "I wonder if we have any friends who would want to wrench it out for the year",
+            confidence: nil,
+            secondOpinion: "I wonder if we have any friends who would want to rent it out for the year")
+        s.expectEqual(doubt.spans.count, 1)
+        s.expectEqual(doubt.spans.first?.text, "wrench")
+        s.expectEqual(doubt.spans.first?.alternative, "rent")
+        s.expectEqual(doubt.spans.first?.kind, .enginesDisagree)
+    }
+
+    s.test("doubt: a dropped word is localised, not smeared across the sentence") { s in
+        // His other real error: "or all the words" delivered as "all the words".
+        // An alignment that shifted would flag the whole tail and be useless.
+        let doubt = TranscriptDoubt.assess(
+            text: "what do we do with the missing words all the words I never said",
+            confidence: nil,
+            secondOpinion: "what do we do with the missing words or all the words I never said")
+        s.expectEqual(doubt.spans.count, 1)
+        s.expectEqual(doubt.spans.first?.alternative, "or")
+    }
+
+    s.test("doubt: agreement is silent") { s in
+        // Both engines wrong the same way is invisible by construction, and a
+        // detector that cried wolf on every dictation would be ignored.
+        let same = "the crew finished the deck today and went home early"
+        s.expect(TranscriptDoubt.assess(text: same, confidence: 0.9, secondOpinion: same).isEmpty)
+        s.expect(TranscriptDoubt.assess(text: same, confidence: nil, secondOpinion: nil).isEmpty)
+    }
+
+    s.test("doubt: low confidence flags the utterance only when nothing better exists") { s in
+        let text = "we need to dig a new well behind the garage"
+        let vague = TranscriptDoubt.assess(text: text, confidence: 0.2, secondOpinion: nil)
+        s.expectEqual(vague.spans.first?.kind, .lowConfidence)
+        // A specific disagreement outranks a vague one — naming the word beats
+        // telling him something somewhere is wrong.
+        let precise = TranscriptDoubt.assess(
+            text: text, confidence: 0.2,
+            secondOpinion: "we need to dig a new wall behind the garage")
+        s.expectEqual(precise.spans.first?.kind, .enginesDisagree)
+        s.expectFalse(precise.spans.contains { $0.kind == .lowConfidence })
+    }
+
+    s.test("doubt: confident dictations are never flagged") { s in
+        let text = "send the change order to the client before friday"
+        s.expect(TranscriptDoubt.assess(text: text, confidence: 0.95, secondOpinion: text).isEmpty)
+    }
+}
