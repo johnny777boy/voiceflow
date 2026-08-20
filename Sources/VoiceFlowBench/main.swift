@@ -23,6 +23,7 @@ import VoiceFlowWhisper
         var model = WhisperModelManager.defaultModelVariant
         var out: String?
         var language = "en-US"
+        var biasTerms: [String] = []
         var args = Array(CommandLine.arguments.dropFirst())
         while let flag = args.first {
             args.removeFirst()
@@ -32,6 +33,10 @@ import VoiceFlowWhisper
             case "--model": model = args.first ?? model; if !args.isEmpty { args.removeFirst() }
             case "--out": out = args.first; if !args.isEmpty { args.removeFirst() }
             case "--language": language = args.first ?? language; if !args.isEmpty { args.removeFirst() }
+            case "--bias":
+                // Terms to feed the recognizer BEFORE it decodes. Only has an
+                // effect with -whisperPromptBiasingEnabled YES.
+                while let next = args.first, !next.hasPrefix("--") { biasTerms.append(next); args.removeFirst() }
             default: break
             }
         }
@@ -68,9 +73,13 @@ import VoiceFlowWhisper
         for (i, url) in files.enumerated() {
             let started = Date()
             let capture = AudioCapture(samples: [], sampleRate: 16_000, duration: 0, fileURL: url)
+            let context = biasTerms.isEmpty
+                ? TranscriptionContext.empty
+                : TranscriptionContext(vocabularyTerms: biasTerms)
             var text = ""
             do {
-                text = try await transcriber.transcribe(capture, languageCode: language).text
+                text = try await transcriber.transcribe(
+                    capture, languageCode: language, context: context).text
             } catch {
                 text = ""   // an empty line keeps the pairing with the reference intact
                 FileHandle.standardError.write("  \(url.lastPathComponent): FAILED \(error)\n".data(using: .utf8)!)
@@ -90,9 +99,10 @@ import VoiceFlowWhisper
         } else {
             print(body, terminator: "")
         }
+        let bias = biasTerms.isEmpty ? "none" : "\(biasTerms.count) terms"
         FileHandle.standardError.write(
-            String(format: "model=%@  files=%d  decode=%.1fs total (%.2fs mean)\n",
-                   model, files.count, totalSeconds,
+            String(format: "model=%@  bias=%@  files=%d  decode=%.1fs total (%.2fs mean)\n",
+                   model, bias, files.count, totalSeconds,
                    totalSeconds / Double(max(files.count, 1))).data(using: .utf8)!)
     }
 

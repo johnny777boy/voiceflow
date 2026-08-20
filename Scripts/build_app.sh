@@ -14,9 +14,14 @@ DIST="$ROOT/dist"
 APP="$DIST/$APP_NAME.app"
 
 echo "==> Building ($CONFIG)…"
-swift build -c "$CONFIG" --package-path "$ROOT"
+# --product, not a bare build: WhisperKit 1.1.0 vendors a TTSKit module we do
+# not use, and it fails Swift 6 strict-concurrency checks. A bare `swift build`
+# compiles it and reports errors that have nothing to do with this app; naming
+# the product builds exactly what ships. (`swift build --product VoiceFlowTests`
+# is likewise the honest way to build the suite.)
+swift build -c "$CONFIG" --package-path "$ROOT" --product "$APP_NAME"
 
-BIN="$(swift build -c "$CONFIG" --package-path "$ROOT" --show-bin-path)/$APP_NAME"
+BIN="$(swift build -c "$CONFIG" --package-path "$ROOT" --product "$APP_NAME" --show-bin-path)/$APP_NAME"
 if [[ ! -f "$BIN" ]]; then
   echo "error: built binary not found at $BIN" >&2
   exit 1
