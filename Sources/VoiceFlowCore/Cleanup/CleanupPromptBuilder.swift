@@ -16,6 +16,22 @@ public enum CleanupPromptBuilder {
             lines.append("Make only trivial fixes (obvious mis-transcriptions). Keep wording essentially verbatim.")
         case .cleanWriting:
             lines.append("Fix ONLY grammar, verb tense, subject–verb agreement, articles/prepositions, punctuation, capitalization, and obvious mis-transcriptions — including errors from a non-native speaker. Remove pure filler ('um', 'uh') and false starts. Keep every content word the speaker used and their sentence structure; correct their sentence, do not rewrite it into different words.")
+            // The small on-device model obeys EXAMPLES far more than rules —
+            // with the abstract instruction alone it proposed near-zero repairs
+            // on 20 real dictations (measured 2026-08-20, audit trail). These
+            // pairs are the owner's actual error patterns; each shows the
+            // SMALLEST correct fix, which is also what the guard will accept.
+            lines.append("""
+            Examples of the repairs you SHOULD make (smallest possible fix):
+            "those issues still occurring" -> "those issues are still occurring"
+            "look how it actually write it" -> "look how it actually writes it"
+            "we've done so many research" -> "we've done so much research"
+            "he ask me for the invoice yesterday" -> "he asked me for the invoice yesterday"
+            "it's not depend on him" -> "it doesn't depend on him"
+            "You know, how it actually write it" -> "You know, how it actually writes it"
+            Keep conversational words like "You know," "I mean," "like" exactly where the speaker put them — removing one makes the whole edit invalid.
+            Leave everything already correct exactly as it is.
+            """)
         case .claudeCode:
             lines.append("This text is for a coding assistant or terminal. Keep code, commands, file paths, and technical tokens EXACTLY as spoken. Do not add trailing punctuation to commands. Do not 'smarten' quotes or dashes.")
         case .email:
