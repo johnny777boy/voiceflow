@@ -3,6 +3,51 @@
 ## ▶️ RESUME HERE (2026-08-19)
 
 
+**2026-08-19 LATE — the parity plan is BUILT (branch `feature/accuracy-parity`,
+installed `0af7359`, 213 tests, 0 warnings). Everything that did not need his
+voice is done; the two things that do are now two commands.**
+
+What landed:
+- **WhisperKit 0.18.0 → 1.1.0.** Cost exactly one line (`supressTokens` typo
+  renamed). Verified by decoding real audio, not assumed.
+- **Context biasing WORKS.** PR #514 fixed the prefill-EOT bug. Proven live:
+  "the payload CMS" → "the Payload CMS", "Whisperflow parody" → "Whisper Flow
+  Parity". Still ships OFF pending WER on his voice.
+- **The prompt had to become a sentence.** A bare list of Capitalised Terms made
+  Whisper copy the LIST'S STYLE into the transcript ("Work Needs Aware Benchmark
+  on My Voice"). `promptText` now emits prose, terms last, with a plain-prose
+  closing clause. Measured before/after.
+- **`VoiceFlowBench`** decodes any audio through the PRODUCTION path (Whisper
+  moved into a `VoiceFlowWhisper` library so the harness cannot drift from the
+  app). `wer_compare.py` scores two runs paired per utterance with a bootstrap
+  CI/p-value, plus entity recall, plus number normalisation (that alone was
+  costing 6.9 WER of pure formatting noise).
+- **`Scripts/bench_session.sh`** — `start` → `prompts` → `models` / `bias`.
+  Capture retention turns one dictation session into a corpus that can be
+  re-decoded under any configuration, so nothing is ever measured by re-reading.
+- **Phonetic near-miss detection** replaces the blind AX watcher as the learning
+  signal. DETECTS ONLY — "codecs"/"codices" are real words, so substitution
+  would destroy words he meant.
+
+**HIS TWO COMMANDS (nothing else is blocked on anything else):**
+```
+Scripts/bench_session.sh start     # then quit + reopen VoiceFlow
+Scripts/bench_session.sh prompts   # read 50 lines, one dictation each
+Scripts/bench_session.sh models    # turbo vs full large-v3 on HIS voice
+Scripts/bench_session.sh bias      # biasing off vs on, same audio
+```
+Both models are already downloaded, so neither costs a wait.
+
+**Gates before anything ships as default:** full large-v3 becomes default only
+if paired WER is significantly better AND he accepts the latency (measured
++31% decode on synthetic: 0.61s → 0.80s). Biasing turns on only if entity
+recall rises without overall WER regressing.
+
+**KNOWN:** WhisperKit 1.1.0 vendors an unused TTSKit module that fails Swift 6
+strict concurrency, so a BARE `swift build` shows errors unrelated to this app.
+Use `--product VoiceFlow` / `--product VoiceFlowTests` (build_app.sh already does).
+
+
 **2026-08-19 EVENING — the full parity plan is in
 `docs/RESEARCH-WISPR-PARITY-PLAN.md` (agent-researched, cited).** Wispr = cloud
 scale + context injection + a privacy bill we refuse; our gaps are the turbo
