@@ -331,7 +331,11 @@ final class AppCoordinator: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 if await self.controller.flagLastDictation() != nil {
-                    NSSound(named: "Purr")?.play()   // quiet ack: flag recorded
+                    // The ack must be UNMISSABLE — a quiet purr left him
+                    // pressing the key four times believing it was broken.
+                    // Clear sound + the on-screen overlay both fire.
+                    NSSound(named: "Glass")?.play()
+                    self.overlay.show(state: .error("Flagged ✓ — last dictation marked wrong"))
                 }
             }
         }
