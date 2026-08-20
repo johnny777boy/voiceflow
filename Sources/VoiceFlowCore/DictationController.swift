@@ -301,6 +301,7 @@ public actor DictationController {
             arbiterSeconds: arbiterSeconds,
             cleanupSeconds: cleanupSeconds,
             engineUsed: transcription.engineName,
+            recognizerConfidence: Double(transcription.confidence),
             cleanupProposed: audit?.proposed,
             cleanupDecision: audit?.decision,
             cleanupRejectReason: audit?.reason,
