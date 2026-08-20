@@ -34,6 +34,8 @@ public actor DictationController {
     private let confusions: PersonalConfusionsStore?
     /// The previous delivered dictation, for re-dictation comparison.
     private var lastDelivered: (text: String, at: Date)?
+    /// The most recent record, so the flag key can mark it.
+    private var lastRecordID: UUID?
     private let inserter: TextInserting
     private let activeApp: ActiveAppProviding
     private let history: HistoryStoring
@@ -109,6 +111,16 @@ public actor DictationController {
         self.screenContext = screenContext
         self.cleanupAudit = cleanupAudit
         self.confusions = confusions
+    }
+
+    /// The one-key error report: mark the most recent dictation as wrong.
+    /// Returns its text so the caller can confirm WHAT was flagged, or nil when
+    /// there is nothing to flag.
+    public func flagLastDictation() -> String? {
+        guard let id = lastRecordID else { return nil }
+        try? history.setFlaggedWrong(id: id)
+        Log.transcription.notice("User flagged the last dictation as WRONG")
+        return lastDelivered?.text
     }
 
     public func updateSettings(_ newValue: AppSettings) {
@@ -330,6 +342,7 @@ public actor DictationController {
             }
         }
         lastDelivered = (raw, record.createdAt)
+        lastRecordID = record.id
 
         if settings.historyEnabled {
             try? history.save(record)

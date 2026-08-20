@@ -410,3 +410,25 @@ func runRedictationTests(_ s: TestSuite) {
             "we want to rent it out for the year")
     }
 }
+
+/// The one-key error report (2026-08-20): press it after a bad dictation and
+/// the system flags the evidence — no repeating, no talking, no editing.
+func runFlagWrongTests(_ s: TestSuite) {
+    s.test("flag: the last dictation can be marked wrong, and it persists") { s in
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("voiceflow-flag-\(UUID().uuidString)", isDirectory: true)
+        let url = dir.appendingPathComponent("history.sqlite")
+        let store = try SQLiteHistoryStore(url: url)
+        var r = TranscriptRecord(rawText: "we need to dig", cleanText: "we need to dig",
+                                 mode: .cleanWriting)
+        try store.save(r)
+        try store.setFlaggedWrong(id: r.id)
+        s.expect(try store.record(id: r.id)?.flaggedWrong == true)
+        // Reopen: the flag survives, old rows default to false.
+        r = TranscriptRecord(rawText: "fine", cleanText: "fine", mode: .cleanWriting)
+        try store.save(r)
+        let reopened = try SQLiteHistoryStore(url: url)
+        s.expect(try reopened.allRecords().contains { $0.flaggedWrong })
+        s.expect(try reopened.record(id: r.id)?.flaggedWrong == false)
+    }
+}

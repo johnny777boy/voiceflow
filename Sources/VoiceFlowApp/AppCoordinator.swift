@@ -35,6 +35,8 @@ final class AppCoordinator: ObservableObject {
     private let controller: DictationController
     private let live: SpeechEngine
     private let hotkeys: GlobalHotkeyManager
+    private var flagKeyGlobalMonitor: Any?
+    private var flagKeyLocalMonitor: Any?
     private let settingsStore: SettingsStore
     private let history: HistoryStoring
     private let secureStore: SecureStoring
@@ -192,6 +194,7 @@ final class AppCoordinator: ObservableObject {
         InputMonitoring.request()                         // nudge the Input Monitoring prompt
         Task { await requestPermissions() }
         registerHotkey()
+        registerFlagKey()
         LoginItemManager.setEnabled(settings.launchAtLogin)
         // Learn from what the user fixes by hand — proposals only, never silent
         // vocabulary changes.
@@ -302,6 +305,30 @@ final class AppCoordinator: ObservableObject {
     func openPrivacySettings(_ pane: String) {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") {
             NSWorkspace.shared.open(url)
+        }
+    }
+
+    /// The "that was wrong" key: ⌃⌥⌘X, one tap after a bad dictation. Flags the
+    /// evidence for the deep check — no repeating, no editing, no reporting.
+    /// A separate monitor from the dictation hotkey so neither can break the
+    /// other; keyDown only, never consumed.
+    private func registerFlagKey() {
+        let mask: NSEvent.EventTypeMask = [.keyDown]
+        let required: NSEvent.ModifierFlags = [.control, .option, .command]
+        let handle: @Sendable (NSEvent) -> Void = { [weak self] event in
+            guard event.keyCode == 7,   // kVK_ANSI_X
+                  event.modifierFlags.intersection([.control, .option, .command, .shift]) == required
+            else { return }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if await self.controller.flagLastDictation() != nil {
+                    NSSound(named: "Purr")?.play()   // quiet ack: flag recorded
+                }
+            }
+        }
+        flagKeyGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: handle)
+        flagKeyLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { event in
+            handle(event); return event
         }
     }
 

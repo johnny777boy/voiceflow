@@ -40,7 +40,8 @@ public final class SQLiteHistoryStore: HistoryStoring, @unchecked Sendable {
             cleanupProposed TEXT,
             cleanupDecision TEXT,
             cleanupRejectReason TEXT,
-            recognizerConfidence REAL
+            recognizerConfidence REAL,
+            flaggedWrong INTEGER NOT NULL DEFAULT 0
         );
         """)
         try execute("CREATE INDEX IF NOT EXISTS idx_transcripts_createdAt ON transcripts(createdAt DESC);")
@@ -64,6 +65,7 @@ public final class SQLiteHistoryStore: HistoryStoring, @unchecked Sendable {
             "cleanupDecision TEXT",
             "cleanupRejectReason TEXT",
             "recognizerConfidence REAL",
+            "flaggedWrong INTEGER NOT NULL DEFAULT 0",
         ] {
             try? execute("ALTER TABLE transcripts ADD COLUMN \(column);")
         }
@@ -80,8 +82,9 @@ public final class SQLiteHistoryStore: HistoryStoring, @unchecked Sendable {
         (id, rawText, cleanText, appBundleIdentifier, appName, mode, insertionStrategy, latencySeconds,
          errorMessage, createdAt, insertLatencySeconds, editedAfterInsert,
          transcribeSeconds, arbiterSeconds, cleanupSeconds, engineUsed,
-         cleanupProposed, cleanupDecision, cleanupRejectReason, recognizerConfidence)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);
+         cleanupProposed, cleanupDecision, cleanupRejectReason, recognizerConfidence,
+         flaggedWrong)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);
         """
         let stmt = try prepare(sql)
         defer { sqlite3_finalize(stmt) }
@@ -106,6 +109,7 @@ public final class SQLiteHistoryStore: HistoryStoring, @unchecked Sendable {
         bindText(stmt, 19, record.cleanupRejectReason)
         if let c = record.recognizerConfidence { sqlite3_bind_double(stmt, 20, c) }
         else { sqlite3_bind_null(stmt, 20) }
+        sqlite3_bind_int(stmt, 21, record.flaggedWrong ? 1 : 0)
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw VoiceFlowError.historyUnavailable("save failed: \(lastErrorMessage())")
         }
@@ -222,6 +226,7 @@ public final class SQLiteHistoryStore: HistoryStoring, @unchecked Sendable {
         let rejectReason = columns > 18 ? columnText(stmt, 18) : nil
         let confidence: Double? = (columns > 19 && sqlite3_column_type(stmt, 19) != SQLITE_NULL)
             ? sqlite3_column_double(stmt, 19) : nil
+        let flagged = columns > 20 ? sqlite3_column_int(stmt, 20) != 0 : false
         return TranscriptRecord(
             id: id, rawText: raw, cleanText: clean, appBundleIdentifier: bundle, appName: appName,
             mode: mode, insertionStrategy: strategy, latencySeconds: latency,
@@ -231,7 +236,7 @@ public final class SQLiteHistoryStore: HistoryStoring, @unchecked Sendable {
             recognizerConfidence: confidence,
             cleanupProposed: proposed, cleanupDecision: decision,
             cleanupRejectReason: rejectReason,
-            errorMessage: error, createdAt: created)
+            errorMessage: error, flaggedWrong: flagged, createdAt: created)
     }
 
     // MARK: - Low-level helpers
