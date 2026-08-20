@@ -36,6 +36,11 @@ public struct TranscriptRecord: Codable, Sendable, Equatable, Hashable, Identifi
     public var cleanupSeconds: Double
     /// Which engine produced the text ("whisper" / "apple"), when known.
     public var engineUsed: String?
+    /// How sure the recogniser was, 0...1 (1 = confident, and 1 when the engine
+    /// reports nothing). Kept because mis-hearings cluster at low confidence:
+    /// it is the only way to find the dictations worth re-checking without
+    /// re-reading every one of them.
+    public var recognizerConfidence: Double?
     /// THE CLEANUP AUDIT (added 2026-08-19). History used to store only the
     /// delivered text, which made "cleanup is not accurate" unanswerable: a
     /// dictation whose polish the guard silently reverted looks identical to one
@@ -68,6 +73,7 @@ public struct TranscriptRecord: Codable, Sendable, Equatable, Hashable, Identifi
         arbiterSeconds: Double = 0,
         cleanupSeconds: Double = 0,
         engineUsed: String? = nil,
+        recognizerConfidence: Double? = nil,
         cleanupProposed: String? = nil,
         cleanupDecision: String? = nil,
         cleanupRejectReason: String? = nil,
@@ -88,6 +94,7 @@ public struct TranscriptRecord: Codable, Sendable, Equatable, Hashable, Identifi
         self.arbiterSeconds = arbiterSeconds
         self.cleanupSeconds = cleanupSeconds
         self.engineUsed = engineUsed
+        self.recognizerConfidence = recognizerConfidence
         self.cleanupProposed = cleanupProposed
         self.cleanupDecision = cleanupDecision
         self.cleanupRejectReason = cleanupRejectReason
@@ -113,6 +120,7 @@ public struct TranscriptRecord: Codable, Sendable, Equatable, Hashable, Identifi
         arbiterSeconds = try c.decodeIfPresent(Double.self, forKey: .arbiterSeconds) ?? 0
         cleanupSeconds = try c.decodeIfPresent(Double.self, forKey: .cleanupSeconds) ?? 0
         engineUsed = try c.decodeIfPresent(String.self, forKey: .engineUsed)
+        recognizerConfidence = try c.decodeIfPresent(Double.self, forKey: .recognizerConfidence)
         cleanupProposed = try c.decodeIfPresent(String.self, forKey: .cleanupProposed)
         cleanupDecision = try c.decodeIfPresent(String.self, forKey: .cleanupDecision)
         cleanupRejectReason = try c.decodeIfPresent(String.self, forKey: .cleanupRejectReason)

@@ -385,8 +385,16 @@ public final class WhisperKitTranscriber: Transcribing, @unchecked Sendable {
         // the file alone — the FallbackTranscriber re-runs the Apple engine, which
         // reads the same file via its internal URL.
         if !retainCaptureFile { try? FileManager.default.removeItem(at: url) }
+        // Whisper's own uncertainty, kept instead of discarded. `avgLogprob` is
+        // roughly -0.1 when the model is sure and below -0.8 when it is
+        // guessing, and guessing is exactly where "wrench" appears instead of
+        // "rent". Nothing branches on it — it is how history can later point at
+        // the dictations most likely to contain an error, which is otherwise
+        // unknowable without re-reading everything.
+        let confidence = minLogProb.map { Float(max(0, min(1, 1 + $0))) } ?? 1
         return VoiceFlowCore.TranscriptionResult(
-            text: text, engineName: "whisper", decodeSeconds: decodeSeconds)
+            text: text, confidence: confidence,
+            engineName: "whisper", decodeSeconds: decodeSeconds)
     }
 
     /// `consultArbiter` plus a stopwatch, so every call site reports how much the
