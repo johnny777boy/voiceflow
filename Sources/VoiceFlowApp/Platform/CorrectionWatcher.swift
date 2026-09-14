@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import ApplicationServices
+import Carbon.HIToolbox
 import VoiceFlowCore
 
 /// Watches the field we just dictated into, briefly, to learn from what the user
@@ -58,7 +59,12 @@ final class CorrectionWatcher {
         if let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier {
             AX.enableManualAccessibility(pid: pid)
         }
-        guard let element = AX.focusedElement(), !Self.isSecure(element) else { return }
+        // Same classification rule as the inserter, and the same verdict. This path
+        // READS the field's contents into the learning store, so an unreadable
+        // element while the system-wide secure flag is on must be refused too —
+        // treating a failed role read as "not a password field" would capture
+        // password text as a correction.
+        guard let element = AX.focusedElement(), !Self.mustRefuse(element) else { return }
         var initial = AX.string(element, kAXValueAttribute)
         if initial == nil {
             // First enable on a Chromium app: the tree needs a beat to build.
@@ -114,8 +120,13 @@ final class CorrectionWatcher {
         }
     }
 
-    private static func isSecure(_ element: AXUIElement) -> Bool {
-        if AX.string(element, kAXSubroleAttribute) == (kAXSecureTextFieldSubrole as String) { return true }
-        return AX.string(element, kAXRoleAttribute) == "AXSecureTextField"
+    private static func mustRefuse(_ element: AXUIElement) -> Bool {
+        SecureInputVerdict.mustRefuseInsertion(
+            systemSecureInputEnabled: IsSecureEventInputEnabled(),
+            focusedField: FocusedFieldSecurity.classify(
+                role: AX.string(element, kAXRoleAttribute),
+                subrole: AX.string(element, kAXSubroleAttribute)
+            )
+        )
     }
 }

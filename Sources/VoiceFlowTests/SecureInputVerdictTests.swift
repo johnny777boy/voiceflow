@@ -47,4 +47,41 @@ func runSecureInputVerdictTests(_ s: TestSuite) {
         s.expectFalse(SecureInputVerdict.mustRefuseInsertion(
             systemSecureInputEnabled: false, focusedField: .unreadable))
     }
+
+    // MARK: - Classification (C001)
+    //
+    // `AX.string` returns nil both when an attribute is absent and when the read
+    // FAILS. Collapsing that into "not secure" means a password field whose
+    // role/subrole cannot be read is treated as an ordinary text box. Bool cannot
+    // express "I could not tell", so the classification must.
+
+    s.test("Classifies a field whose role and subrole are both unreadable as unreadable") { s in
+        s.expectEqual(FocusedFieldSecurity.classify(role: nil, subrole: nil), .unreadable)
+    }
+
+    s.test("Classifies the secure text field subrole as secure") { s in
+        s.expectEqual(FocusedFieldSecurity.classify(role: "AXTextField", subrole: "AXSecureTextField"), .secure)
+    }
+
+    s.test("Classifies the secure text field role as secure") { s in
+        s.expectEqual(FocusedFieldSecurity.classify(role: "AXSecureTextField", subrole: nil), .secure)
+    }
+
+    /// The common case for Electron/web boxes: a readable role, no subrole. This
+    /// must stay .notSecure — treating it as unreadable would re-break insertion
+    /// for every chat box the moment any app holds secure input.
+    s.test("Classifies a readable ordinary role with no subrole as not secure") { s in
+        s.expectEqual(FocusedFieldSecurity.classify(role: "AXTextArea", subrole: nil), .notSecure)
+    }
+
+    s.test("Classifies a readable non-secure subrole with no role as not secure") { s in
+        s.expectEqual(FocusedFieldSecurity.classify(role: nil, subrole: "AXStandardWindow"), .notSecure)
+    }
+
+    /// THE C001 REGRESSION, end to end.
+    s.test("Refuses a field with unreadable attributes while another app holds secure input") { s in
+        let field = FocusedFieldSecurity.classify(role: nil, subrole: nil)
+        s.expect(SecureInputVerdict.mustRefuseInsertion(
+            systemSecureInputEnabled: true, focusedField: field))
+    }
 }

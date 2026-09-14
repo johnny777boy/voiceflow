@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import ApplicationServices
+import Carbon.HIToolbox
 import VoiceFlowCore
 
 /// Captures the current destination: frontmost app (NSWorkspace) plus the focused
@@ -28,7 +29,18 @@ final class WorkspaceActiveAppProvider: ActiveAppProviding, @unchecked Sendable 
             }
         }
 
-        let isSecure = (subrole == (kAXSecureTextFieldSubrole as String)) || (role == "AXSecureTextField")
+        // Same rule as the inserter: an element whose role AND subrole both failed
+        // to read is `.unreadable`, not `.notSecure`, and the system-wide flag
+        // decides that case. Reading nil as "safe" here would let DestinationGuard
+        // wave through a password field that hides itself from Accessibility.
+        // No focused element leaves both nil, which classify() already reports as
+        // .unreadable — the same answer as an element whose attributes failed to
+        // read. Both mean "nothing known", and the flag decides.
+        let security = FocusedFieldSecurity.classify(role: role, subrole: subrole)
+        let isSecure = SecureInputVerdict.mustRefuseInsertion(
+            systemSecureInputEnabled: IsSecureEventInputEnabled(),
+            focusedField: security
+        )
 
         return DestinationSnapshot(
             bundleIdentifier: bundleID,

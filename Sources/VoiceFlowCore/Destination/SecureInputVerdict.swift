@@ -8,6 +8,30 @@ public enum FocusedFieldSecurity: Equatable, Sendable {
     case notSecure
     /// AX could not read the element at all — nothing is known about it.
     case unreadable
+
+    /// The AX subrole macOS gives a password field.
+    public static let secureTextFieldSubrole = "AXSecureTextField"
+    /// The AX role macOS gives a password field.
+    public static let secureTextFieldRole = "AXSecureTextField"
+
+    /// Classify a focused element from the role/subrole Accessibility reported.
+    ///
+    /// Both are optional because `AXUIElementCopyAttributeValue` returns nothing
+    /// for an attribute that is absent AND for one whose read FAILED — the two are
+    /// indistinguishable. Collapsing that into "not secure" is how a password
+    /// field that hides its role gets treated as an ordinary text box, so when
+    /// NEITHER attribute reads, the answer is `.unreadable`, not `.notSecure`.
+    ///
+    /// A readable role with no subrole is the ordinary case for Electron and web
+    /// text boxes and must stay `.notSecure` — demanding both would refuse every
+    /// chat box the moment any app holds secure input, which is the bug this
+    /// branch exists to fix.
+    public static func classify(role: String?, subrole: String?) -> FocusedFieldSecurity {
+        if subrole == secureTextFieldSubrole || role == secureTextFieldRole { return .secure }
+        // Nothing readable ⇒ nothing known. Do not infer safety from silence.
+        if role == nil && subrole == nil { return .unreadable }
+        return .notSecure
+    }
 }
 
 /// Decides whether automated insertion (AX-set or synthetic ⌘V) must be refused.
