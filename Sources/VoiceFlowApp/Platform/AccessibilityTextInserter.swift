@@ -70,7 +70,7 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
         if strategy != .copyOnly, focusedFieldIsSecure() {
             copyToClipboard(text)
             return InsertionOutcome(strategy: .copyOnly, didInsert: false,
-                note: "Focused field is secure; copied to clipboard instead of inserting.")
+                note: Self.secureBlockedNote())
         }
         // When continuing existing text (a 2nd dictation into the same box), add a
         // leading space so words don't glue together ("world" + "how" → "world how").
@@ -167,7 +167,7 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
                 // Field became secure between the guard above and the keystroke.
                 copyToClipboard(text)
                 return InsertionOutcome(strategy: .copyOnly, didInsert: false,
-                    note: "Focused field is secure; copied to clipboard instead of inserting.")
+                    note: Self.secureBlockedNote())
             }
             return InsertionOutcome(strategy: .clipboardPaste, didInsert: true)
 
@@ -211,18 +211,48 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
         return ""
     }
 
-    /// Whether the *currently* focused element is a secure (password) field.
+    /// Whether insertion into the *currently* focused element must be refused.
     ///
-    /// Two independent signals, so we never paste into a password field even when
-    /// Accessibility can't read it:
-    ///  1. OS-level secure keyboard entry — password fields enable this system-wide,
-    ///     and it's readable without AX. This closes the hole where `AX.focusedElement()`
-    ///     is nil (no AX, or the field doesn't expose AX) but the field IS secure.
-    ///  2. The focused AX element's role/subrole, when available.
+    /// Reads the two available signals — the focused AX element's role/subrole, and
+    /// OS-level secure keyboard entry — and hands them to `SecureInputVerdict`,
+    /// which owns the rule (and is unit-tested).
+    ///
+    /// Note that OS-level secure input is SYSTEM-WIDE and can be left on by an
+    /// unrelated app, so it is deliberately NOT a veto on its own; it decides only
+    /// the case where AX cannot read the field. See `SecureInputVerdict`.
     private func focusedFieldIsSecure() -> Bool {
-        if IsSecureEventInputEnabled() { return true }
-        guard let focused = AX.focusedElement() else { return false }
-        return Self.isSecure(focused)
+        let field: FocusedFieldSecurity = {
+            guard let focused = AX.focusedElement() else { return .unreadable }
+            return Self.isSecure(focused) ? .secure : .notSecure
+        }()
+        return SecureInputVerdict.mustRefuseInsertion(
+            systemSecureInputEnabled: IsSecureEventInputEnabled(),
+            focusedField: field
+        )
+    }
+
+    /// The app currently holding system-wide secure input, if any.
+    ///
+    /// Secure input is process-wide, so when it blocks a dictation the only
+    /// actionable thing we can tell the user is WHO is holding it — otherwise the
+    /// app just degrades to copy-only with no explanation (Arc held it for hours
+    /// on 2026-09-14 and nothing on screen said so).
+    static func secureInputHolderName() -> String? {
+        guard IsSecureEventInputEnabled(),
+              let session = CGSessionCopyCurrentDictionary() as? [String: Any],
+              let pid = session["kCGSSessionSecureInputPID"] as? pid_t,
+              pid != 0 else { return nil }
+        return NSRunningApplication(processIdentifier: pid)?.localizedName
+    }
+
+    /// The note shown when a dictation is diverted to the clipboard because the
+    /// destination looked secure. Names the holder when the system-wide flag is
+    /// what stopped us, so a stuck app is diagnosable instead of silent.
+    static func secureBlockedNote() -> String {
+        if let holder = secureInputHolderName() {
+            return "Secure input is on (held by \(holder)); copied to clipboard instead of inserting."
+        }
+        return "Focused field is secure; copied to clipboard instead of inserting."
     }
 
     private static func isSecure(_ element: AXUIElement) -> Bool {
