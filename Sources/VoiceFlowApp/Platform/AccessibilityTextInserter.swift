@@ -28,13 +28,13 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
         // unreliable across apps (Notes, Electron, browsers), so we don't gate on
         // it — typing at the caret / synthetic paste posts to wherever the cursor
         // is. Only a secure (password) field is ever refused.
-        guard let focused = AX.focusedElement() else {
+        let refuse = SecureInputVerdict.mustRefuseInsertion(
+            systemSecureInputEnabled: IsSecureEventInputEnabled(),
+            focusedField: Self.focusedFieldSecurity()
+        )
+        guard let focused = AX.focusedElement(), !refuse else {
             return DestinationCapabilities(supportsAccessibilityInsertion: false,
-                                           allowsSyntheticPaste: true, isSecureInput: false)
-        }
-        if Self.isSecure(focused) {
-            return DestinationCapabilities(supportsAccessibilityInsertion: false,
-                                           allowsSyntheticPaste: false, isSecureInput: true)
+                                           allowsSyntheticPaste: !refuse, isSecureInput: refuse)
         }
         let settable = AX.isSettable(focused, kAXSelectedTextAttribute) || AX.isSettable(focused, kAXValueAttribute)
         return DestinationCapabilities(
@@ -70,7 +70,7 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
         if strategy != .copyOnly, focusedFieldIsSecure() {
             copyToClipboard(text)
             return InsertionOutcome(strategy: .copyOnly, didInsert: false,
-                note: "Focused field is secure; copied to clipboard instead of inserting.")
+                note: Self.secureBlockedNote())
         }
         // When continuing existing text (a 2nd dictation into the same box), add a
         // leading space so words don't glue together ("world" + "how" → "world how").
@@ -109,7 +109,7 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
             return false
         }
         if focusedFieldIsSecure() { return false }
-        guard let focused = AX.focusedElement(), !Self.isSecure(focused) else { return false }
+        guard let focused = AX.focusedElement(), !Self.mustRefuse(focused) else { return false }
         guard AX.isSettable(focused, kAXSelectedTextAttribute) else { return false }
         guard let value = AX.string(focused, kAXValueAttribute),
               let caret = AX.caretLocation(focused),
@@ -167,7 +167,7 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
                 // Field became secure between the guard above and the keystroke.
                 copyToClipboard(text)
                 return InsertionOutcome(strategy: .copyOnly, didInsert: false,
-                    note: "Focused field is secure; copied to clipboard instead of inserting.")
+                    note: Self.secureBlockedNote())
             }
             return InsertionOutcome(strategy: .clipboardPaste, didInsert: true)
 
@@ -211,24 +211,70 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
         return ""
     }
 
-    /// Whether the *currently* focused element is a secure (password) field.
+    /// Whether insertion into the *currently* focused element must be refused.
     ///
-    /// Two independent signals, so we never paste into a password field even when
-    /// Accessibility can't read it:
-    ///  1. OS-level secure keyboard entry — password fields enable this system-wide,
-    ///     and it's readable without AX. This closes the hole where `AX.focusedElement()`
-    ///     is nil (no AX, or the field doesn't expose AX) but the field IS secure.
-    ///  2. The focused AX element's role/subrole, when available.
+    /// Reads the two available signals — the focused AX element's role/subrole, and
+    /// OS-level secure keyboard entry — and hands them to `SecureInputVerdict`,
+    /// which owns the rule (and is unit-tested).
+    ///
+    /// Note that OS-level secure input is SYSTEM-WIDE and can be left on by an
+    /// unrelated app, so it is deliberately NOT a veto on its own; it decides only
+    /// the case where AX cannot read the field. See `SecureInputVerdict`.
     private func focusedFieldIsSecure() -> Bool {
-        if IsSecureEventInputEnabled() { return true }
-        guard let focused = AX.focusedElement() else { return false }
-        return Self.isSecure(focused)
+        return SecureInputVerdict.mustRefuseInsertion(
+            systemSecureInputEnabled: IsSecureEventInputEnabled(),
+            focusedField: Self.focusedFieldSecurity()
+        )
     }
 
-    private static func isSecure(_ element: AXUIElement) -> Bool {
-        let role = AX.string(element, kAXRoleAttribute)
-        let subrole = AX.string(element, kAXSubroleAttribute)
-        return (subrole == (kAXSecureTextFieldSubrole as String)) || (role == "AXSecureTextField")
+    /// The app currently holding system-wide secure input, if any.
+    ///
+    /// Secure input is process-wide, so when it blocks a dictation the only
+    /// actionable thing we can tell the user is WHO is holding it — otherwise the
+    /// app just degrades to copy-only with no explanation (Arc held it for hours
+    /// on 2026-09-14 and nothing on screen said so).
+    static func secureInputHolderName() -> String? {
+        guard IsSecureEventInputEnabled(),
+              let session = CGSessionCopyCurrentDictionary() as? [String: Any],
+              let pid = session["kCGSSessionSecureInputPID"] as? pid_t,
+              pid != 0 else { return nil }
+        return NSRunningApplication(processIdentifier: pid)?.localizedName
+    }
+
+    /// The note shown when a dictation is diverted to the clipboard because the
+    /// destination looked secure. Names the holder when the system-wide flag is
+    /// what stopped us, so a stuck app is diagnosable instead of silent.
+    static func secureBlockedNote() -> String {
+        if let holder = secureInputHolderName() {
+            return "Secure input is on (held by \(holder)); copied to clipboard instead of inserting."
+        }
+        return "Focused field is secure; copied to clipboard instead of inserting."
+    }
+
+    /// Classify a focused element. Returns `.unreadable` — never `.notSecure` —
+    /// when Accessibility could not read its role OR its subrole, because
+    /// `AX.string` returns nil for a failed read exactly as it does for an absent
+    /// attribute, and silence is not evidence of safety.
+    private static func classify(_ element: AXUIElement) -> FocusedFieldSecurity {
+        FocusedFieldSecurity.classify(
+            role: AX.string(element, kAXRoleAttribute),
+            subrole: AX.string(element, kAXSubroleAttribute)
+        )
+    }
+
+    /// The live classification of whatever is focused right now.
+    private static func focusedFieldSecurity() -> FocusedFieldSecurity {
+        guard let focused = AX.focusedElement() else { return .unreadable }
+        return classify(focused)
+    }
+
+    /// Whether insertion into `element` must be refused *at this instant*, taking
+    /// the system-wide flag into account. Every AX write boundary calls this.
+    private static func mustRefuse(_ element: AXUIElement) -> Bool {
+        SecureInputVerdict.mustRefuseInsertion(
+            systemSecureInputEnabled: IsSecureEventInputEnabled(),
+            focusedField: classify(element)
+        )
     }
 
     func copyToClipboard(_ text: String) {
@@ -241,16 +287,21 @@ final class AccessibilityTextInserter: TextInserting, @unchecked Sendable {
 
     private func insertViaAccessibility(_ text: String) -> Bool {
         guard let focused = AX.focusedElement() else { return false }
-        // Re-check the *specific* element we are about to write: focus may have
-        // moved to a secure field since the guard in insert(). Never AX-set it.
-        if Self.isSecure(focused) { return false }
+        // Re-check the *specific* element we are about to write, against the FULL
+        // verdict (element classification + the live system-wide flag), not just
+        // the element's role. Focus can move to a password field, and the flag can
+        // turn on, between the guard in insert() and the write below — so the
+        // check is repeated immediately before EACH AX.setString, not once here.
+        if Self.mustRefuse(focused) { return false }
         // Prefer replacing the current selection (inserts at the caret).
         if AX.isSettable(focused, kAXSelectedTextAttribute) {
+            guard !Self.mustRefuse(focused) else { return false }
             if AX.setString(focused, kAXSelectedTextAttribute, text) { return true }
         }
         // Otherwise append to the existing value.
         if AX.isSettable(focused, kAXValueAttribute) {
             let existing = AX.string(focused, kAXValueAttribute) ?? ""
+            guard !Self.mustRefuse(focused) else { return false }
             return AX.setString(focused, kAXValueAttribute, existing + text)
         }
         return false
